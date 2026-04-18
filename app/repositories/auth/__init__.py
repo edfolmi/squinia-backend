@@ -1,0 +1,5 @@
+"""Persistence layer for auth domain."""
+
+from app.repositories.auth.user_repository import UserRepository
+
+__all__ = ["UserRepository"]
