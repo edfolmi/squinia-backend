@@ -3,10 +3,11 @@ FastAPI dependencies for authentication and platform authorization.
 """
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import AppError
 from app.db.session import get_db
 from app.models.auth.user import PlatformRole, User
 from app.services.auth import AuthService
@@ -34,10 +35,7 @@ async def get_current_active_user(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
     if not current_user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user",
-        )
+        raise AppError(status_code=403, code="USER_INACTIVE", message="Inactive user")
     return current_user
 
 
@@ -52,9 +50,10 @@ def require_platform_role(minimum: PlatformRole):
         current_user: Annotated[User, Depends(get_current_active_user)],
     ) -> User:
         if _platform_role_rank(current_user.platform_role) < _platform_role_rank(minimum):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient platform privileges",
+            raise AppError(
+                status_code=403,
+                code="INSUFFICIENT_PRIVILEGES",
+                message="Insufficient platform privileges",
             )
         return current_user
 

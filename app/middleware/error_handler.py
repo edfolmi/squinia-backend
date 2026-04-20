@@ -1,78 +1,82 @@
 """
-Global error handling middleware.
-Provides consistent error responses and logging.
+Global exception handlers — every error returns the standard API envelope.
 """
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+from app.core.exceptions import AppError
 from app.core.logging import get_logger
+from app.schemas.response import ErrorDetail, fail
 
 logger = get_logger(__name__)
 
 
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """
-    Handle Pydantic validation errors with detailed error messages.
-    """
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    """Handle structured ``AppError`` raised by services / dependencies."""
     logger.warning(
-        "Validation error",
+        "App error",
         path=request.url.path,
-        errors=exc.errors()
+        code=exc.code,
+        message=exc.message,
     )
-    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=fail(code=exc.code, message=exc.message),
+        headers=exc.headers,
+    )
+
+
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError,
+) -> JSONResponse:
+    """Pydantic / FastAPI validation errors → 422 envelope."""
+    logger.warning("Validation error", path=request.url.path, errors=exc.errors())
+    details = [
+        ErrorDetail(
+            field=".".join(str(loc) for loc in err.get("loc", [])),
+            message=err.get("msg", "Invalid value"),
+        )
+        for err in exc.errors()
+    ]
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "detail": exc.errors(),
-            "message": "Validation error"
-        }
+        content=fail(
+            code="VALIDATION_ERROR",
+            message="Invalid request data",
+            details=details,
+        ),
     )
 
 
-async def database_exception_handler(request: Request, exc: SQLAlchemyError):
-    """
-    Handle database errors gracefully.
-    """
-    logger.error(
-        "Database error",
-        path=request.url.path,
-        error=str(exc)
-    )
-    
+async def database_exception_handler(
+    request: Request, exc: SQLAlchemyError,
+) -> JSONResponse:
+    """Database errors → 409 (integrity) or 500."""
+    logger.error("Database error", path=request.url.path, error=str(exc))
     if isinstance(exc, IntegrityError):
         return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
-            content={
-                "detail": "Database integrity constraint violation",
-                "message": "Resource conflict"
-            }
+            content=fail(code="CONFLICT", message="Resource conflict"),
         )
-    
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": "Database error occurred",
-            "message": "Internal server error"
-        }
+        content=fail(code="INTERNAL_ERROR", message="Something went wrong"),
     )
 
 
-async def general_exception_handler(request: Request, exc: Exception):
-    """
-    Catch-all exception handler for unexpected errors.
-    """
+async def general_exception_handler(
+    request: Request, exc: Exception,
+) -> JSONResponse:
+    """Catch-all — never leak internals."""
     logger.error(
         "Unexpected error",
         path=request.url.path,
         error=str(exc),
-        exc_info=True
+        exc_info=True,
     )
-    
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": "An unexpected error occurred",
-            "message": "Internal server error"
-        }
+        content=fail(code="INTERNAL_ERROR", message="Something went wrong"),
     )

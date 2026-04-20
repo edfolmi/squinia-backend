@@ -7,14 +7,15 @@ import math
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.core.security import security_service
-from app.models.auth.user import User, PlatformRole
+from app.models.auth.user import PlatformRole, User
 from app.repositories.auth import UserRepository
-from app.schemas.auth.user import UserCreate, UserList, UserUpdate
+from app.schemas.auth.user import UserCreate, UserUpdate
+
 logger = get_logger(__name__)
 
 
@@ -27,14 +28,16 @@ class UserService:
 
     async def create_user(self, user_in: UserCreate) -> User:
         if not user_in.password:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Password is required for this registration flow",
+            raise AppError(
+                status_code=400,
+                code="PASSWORD_REQUIRED",
+                message="Password is required for this registration flow",
             )
         if await self.user_repo.email_exists(user_in.email):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered",
+            raise AppError(
+                status_code=409,
+                code="EMAIL_ALREADY_EXISTS",
+                message="Email already registered",
             )
 
         user_data = {
@@ -51,22 +54,19 @@ class UserService:
     async def get_user(self, user_id: UUID) -> User:
         user = await self.user_repo.get(user_id)
         if not user or user.deleted_at is not None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            raise AppError(status_code=404, code="USER_NOT_FOUND", message="User not found")
         return user
 
-    async def list_users(self, page: int = 1, page_size: int = 50) -> UserList:
+    async def list_users(self, page: int = 1, page_size: int = 50) -> dict:
         skip = (page - 1) * page_size
         users = await self.user_repo.get_multi(skip=skip, limit=page_size)
         total = await self.user_repo.count()
-        total_pages = math.ceil(total / page_size) if page_size else 0
-
-        return UserList(
-            items=users,
-            total=total,
-            page=page,
-            page_size=page_size,
-            total_pages=total_pages,
-        )
+        return {
+            "users": users,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
 
     def _can_manage_user(self, actor: User, target_id: UUID) -> bool:
         if actor.id == target_id:
@@ -80,14 +80,15 @@ class UserService:
         current_user: User,
     ) -> User:
         if not self._can_manage_user(current_user, user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized to update this user",
+            raise AppError(
+                status_code=403,
+                code="FORBIDDEN",
+                message="Not authorized to update this user",
             )
 
         user = await self.user_repo.get(user_id)
         if not user or user.deleted_at is not None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            raise AppError(status_code=404, code="USER_NOT_FOUND", message="User not found")
 
         staff = current_user.is_platform_staff()
         update_data: dict = {}
@@ -95,9 +96,10 @@ class UserService:
         if user_in.email is not None:
             if user_in.email != user.email:
                 if await self.user_repo.email_exists(str(user_in.email), exclude_user_id=user.id):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Email already registered",
+                    raise AppError(
+                        status_code=409,
+                        code="EMAIL_ALREADY_EXISTS",
+                        message="Email already registered",
                     )
             update_data["email"] = str(user_in.email)
 
@@ -109,25 +111,28 @@ class UserService:
 
         if user_in.platform_role is not None:
             if not staff:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Not authorized to change platform role",
+                raise AppError(
+                    status_code=403,
+                    code="FORBIDDEN",
+                    message="Not authorized to change platform role",
                 )
             update_data["platform_role"] = user_in.platform_role
 
         if user_in.is_active is not None:
             if not staff:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Not authorized to change account status",
+                raise AppError(
+                    status_code=403,
+                    code="FORBIDDEN",
+                    message="Not authorized to change account status",
                 )
             update_data["is_active"] = user_in.is_active
 
         if user_in.is_verified is not None:
             if not staff:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Not authorized to change verification status",
+                raise AppError(
+                    status_code=403,
+                    code="FORBIDDEN",
+                    message="Not authorized to change verification status",
                 )
             update_data["is_verified"] = user_in.is_verified
 
@@ -144,7 +149,7 @@ class UserService:
         """Soft-delete: set deleted_at and deactivate."""
         user = await self.user_repo.get(user_id)
         if not user or user.deleted_at is not None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+            raise AppError(status_code=404, code="USER_NOT_FOUND", message="User not found")
 
         await self.user_repo.update(
             user_id,
