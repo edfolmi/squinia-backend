@@ -6,3 +6,4 @@ modules or autogenerate sees an empty schema and emits only ``pass``.
 """
 
 import app.models.auth  # noqa: F401
+import app.models.simulation  # noqa: F401
