@@ -12,7 +12,7 @@ from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.core.security import security_service
 from app.models.auth.user import User
-from app.repositories.auth import UserRepository
+from app.repositories.auth import MembershipRepository, UserRepository
 from app.schemas.auth.auth import Token
 
 logger = get_logger(__name__)
@@ -24,6 +24,16 @@ class AuthService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.user_repo = UserRepository(db)
+        self.membership_repo = MembershipRepository(db)
+
+    async def _access_token_claims(self, user: User) -> dict[str, str]:
+        """Embed default tenant + org role for tenant-scoped APIs (never trust without DB check)."""
+        claims: dict[str, str] = {"platform_role": user.platform_role.value}
+        m = await self.membership_repo.get_default_for_user(user.id)
+        if m:
+            claims["tenant_id"] = str(m.tenant_id)
+            claims["org_role"] = m.role.value
+        return claims
 
     async def authenticate_user(self, email: str, password: str) -> Optional[User]:
         user = await self.user_repo.get_by_email(email)
@@ -56,9 +66,10 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+        claims = await self._access_token_claims(user)
         access_token = security_service.create_access_token(
             subject=str(user.id),
-            additional_claims={"platform_role": user.platform_role.value},
+            additional_claims=claims,
         )
         refresh_token = security_service.create_refresh_token(subject=str(user.id))
         return {
@@ -86,9 +97,10 @@ class AuthService:
         if not user or not user.is_active or user.deleted_at is not None:
             raise AppError(status_code=401, code="USER_UNAVAILABLE", message="User not found or inactive")
 
+        claims = await self._access_token_claims(user)
         access_token = security_service.create_access_token(
             subject=str(user.id),
-            additional_claims={"platform_role": user.platform_role.value},
+            additional_claims=claims,
         )
         new_refresh = security_service.create_refresh_token(subject=str(user.id))
         logger.info("Access token refreshed", user_id=str(user.id))

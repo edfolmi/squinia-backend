@@ -110,6 +110,7 @@ class Assignment(BaseModel):
     )
     due_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tenant: Mapped["Tenant"] = relationship("Tenant")
     session: Mapped[Optional["SimulationSession"]] = relationship("SimulationSession", back_populates="assignments")

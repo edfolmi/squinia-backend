@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60
+
+    # Internal worker / service-to-service calls (set in production)
+    INTERNAL_API_KEY: str = "dev-internal-key-change-me"
+
+    # Short-lived WebSocket session token (minutes)
+    WS_SESSION_TOKEN_EXPIRE_MINUTES: int = 5
     
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]

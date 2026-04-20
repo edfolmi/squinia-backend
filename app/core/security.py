@@ -144,6 +144,25 @@ class SecurityService:
         """
         return payload.get("type") == expected_type
 
+    @staticmethod
+    def create_ws_session_token(session_id: str, user_id: str) -> str:
+        """Short-lived token scoped to a single simulation session (WebSocket auth)."""
+        expire = datetime.utcnow() + timedelta(minutes=settings.WS_SESSION_TOKEN_EXPIRE_MINUTES)
+        to_encode = {
+            "exp": expire,
+            "sub": str(user_id),
+            "session_id": str(session_id),
+            "type": "ws_session",
+        }
+        return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+    @staticmethod
+    def decode_ws_session_token(token: str) -> Optional[Dict[str, Any]]:
+        payload = SecurityService.decode_token(token)
+        if not payload or payload.get("type") != "ws_session":
+            return None
+        return payload
+
 
 # Create global instance
 security_service = SecurityService()

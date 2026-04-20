@@ -489,6 +489,16 @@ For WebSocket-based AI chat, use event-typed messages:
 
 ---
 
+# 14. SIMULATION API (PHASE 3)
+
+* **Tenant scope**: Access tokens embed the user’s default active membership as `tenant_id` and `org_role` claims (see `AuthService._access_token_claims`). Tenant-scoped routes use `TenantMember`, which **re-validates** membership in Postgres; never accept `tenant_id` from the JSON body.
+* **Pagination**: Simulation list endpoints use `?page=1&limit=20` (envelope `meta.pagination` still uses `limit` / `offset` / `has_next`).
+* **Standard envelope**: All simulation HTTP routes return the same `success` / `data` / `error` / `meta` envelope as auth.
+* **WebSocket**: Connect to `{API_V1_PREFIX}/ws/sessions/{session_id}?token=<ws_session_jwt>`. The `ws_token` from `POST /sessions` is short-lived (`WS_SESSION_TOKEN_EXPIRE_MINUTES`, default 5).
+* **Internal workers**: `POST/PATCH /api/v1/internal/evaluations/*` require header `X-Internal-Key` matching `INTERNAL_API_KEY` in settings (VPC / mesh restriction in production).
+
+---
+
 # FINAL DIRECTIVE
 
 This codebase must evolve into a **category-defining AI platform**, not a prototype.

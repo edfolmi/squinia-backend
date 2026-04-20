@@ -1,0 +1,91 @@
+"""HTTP request bodies for simulation APIs (tenant_id never accepted from client)."""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, Field, ConfigDict
+
+from app.models.simulation.assignment import AssignmentType
+from app.models.simulation.cohort import CohortStatus
+from app.models.simulation.cohort_member import CohortMemberRole
+from app.models.simulation.scenario import AgentRole, ScenarioDifficulty, ScenarioStatus
+from app.models.simulation.simulation_session import SessionMode
+
+
+class CohortCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    status: CohortStatus = CohortStatus.DRAFT
+    starts_at: Optional[datetime] = None
+    ends_at: Optional[datetime] = None
+
+
+class CohortMembersAddRequest(BaseModel):
+    user_ids: list[UUID] = Field(..., min_length=1)
+    role: CohortMemberRole = CohortMemberRole.STUDENT
+
+
+class ScenarioCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    agent_role: AgentRole
+    difficulty: ScenarioDifficulty = ScenarioDifficulty.INTERMEDIATE
+    status: ScenarioStatus = ScenarioStatus.DRAFT
+    config: dict[str, Any] = Field(default_factory=dict)
+    estimated_minutes: int = Field(default=30, ge=1)
+    is_template: bool = False
+
+
+class RubricReorderRequest(BaseModel):
+    ordered_ids: list[UUID] = Field(..., min_length=1)
+
+
+class SimulationSessionStartRequest(BaseModel):
+    scenario_id: UUID
+    cohort_id: Optional[UUID] = None
+    mode: SessionMode = SessionMode.TEXT
+
+
+class InternalEvalTriggerRequest(BaseModel):
+    session_id: UUID
+
+
+class EvalScoreCompleteItem(BaseModel):
+    rubric_item_id: UUID
+    score: int = Field(..., ge=0)
+    rationale: Optional[str] = None
+
+
+class InternalEvalCompleteRequest(BaseModel):
+    overall_score: int = Field(..., ge=0, le=100)
+    feedback_summary: str
+    strengths: Optional[str] = None
+    improvements: Optional[str] = None
+    highlights: list[dict[str, Any]] = Field(default_factory=list)
+    scores: list[EvalScoreCompleteItem] = Field(default_factory=list)
+
+
+class AssignmentCreateRequest(BaseModel):
+    assigned_to: UUID
+    type: AssignmentType
+    title: str = Field(..., min_length=1, max_length=255)
+    instructions: Optional[str] = None
+    content: dict[str, Any] = Field(default_factory=dict)
+    due_at: Optional[datetime] = None
+    session_id: Optional[UUID] = None
+
+
+class AssignmentSubmitRequest(BaseModel):
+    content: Optional[str] = None
+    files: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AssignmentGradeRequest(BaseModel):
+    score: int = Field(..., ge=0)
+    feedback: Optional[str] = None
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"score": 85, "feedback": "Good structure"}},
+    )
