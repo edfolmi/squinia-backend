@@ -56,16 +56,8 @@ class AuthService:
         logger.info("User authenticated", user_id=str(user.id), email=email)
         return user
 
-    async def login(self, email: str, password: str) -> dict:
-        user = await self.authenticate_user(email, password)
-        if not user:
-            raise AppError(
-                status_code=401,
-                code="INVALID_CREDENTIALS",
-                message="Incorrect email or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-
+    async def build_login_bundle(self, user: User) -> dict:
+        """Issue access + refresh tokens for an already-authenticated user."""
         claims = await self._access_token_claims(user)
         access_token = security_service.create_access_token(
             subject=str(user.id),
@@ -76,6 +68,17 @@ class AuthService:
             "user": user,
             "tokens": Token(access_token=access_token, refresh_token=refresh_token),
         }
+
+    async def login(self, email: str, password: str) -> dict:
+        user = await self.authenticate_user(email, password)
+        if not user:
+            raise AppError(
+                status_code=401,
+                code="INVALID_CREDENTIALS",
+                message="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return await self.build_login_bundle(user)
 
     async def refresh_access_token(self, refresh_token: str) -> Token:
         payload = security_service.decode_token(refresh_token)

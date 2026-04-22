@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+
+    # Public URL for links in transactional email (Next.js app)
+    PUBLIC_APP_URL: str = "http://localhost:3000"
+
+    # Transactional email: ses | console | none
+    EMAIL_PROVIDER: Literal["ses", "console", "none"] = "console"
+    AWS_REGION: str = "us-east-1"
+    SES_FROM_EMAIL: str = "noreply@example.com"
     
     # Logging
     LOG_LEVEL: str = "INFO"

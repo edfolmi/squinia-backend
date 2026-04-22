@@ -13,6 +13,7 @@ from app.schemas.auth.auth import LoginRequest, RefreshTokenRequest
 from app.schemas.auth.user import UserCreate, UserResponse
 from app.schemas.response import ok
 from app.services.auth import AuthService
+from app.services.auth_verification import AuthVerificationService
 from app.services.user import UserService
 
 router = APIRouter()
@@ -26,6 +27,7 @@ async def register(
     """Create a platform user account (password-based)."""
     user_service = UserService(db)
     user = await user_service.create_user(user_in)
+    await AuthVerificationService(db).issue_and_send_for_user(user)
     return ok({"user": UserResponse.model_validate(user).model_dump(mode="json")})
 
 

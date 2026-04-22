@@ -26,6 +26,12 @@ class UserRepository:
         result = await self.db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
 
+    async def get_by_email_lower(self, email: str) -> Optional[User]:
+        em = email.strip().lower()
+        stmt = select(User).where(func.lower(User.email) == em)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def email_exists(self, email: str, exclude_user_id: Optional[UUID] = None) -> bool:
         stmt = select(func.count()).select_from(User).where(User.email == email)
         if exclude_user_id is not None:

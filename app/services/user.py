@@ -15,6 +15,7 @@ from app.core.security import security_service
 from app.models.auth.user import PlatformRole, User
 from app.repositories.auth import UserRepository
 from app.schemas.auth.user import UserCreate, UserUpdate
+from app.services.workspace_bootstrap import ensure_personal_workspace
 
 logger = get_logger(__name__)
 
@@ -46,6 +47,13 @@ class UserService:
             "full_name": user_in.full_name,
         }
         user = await self.user_repo.create(user_data)
+        await self.db.flush()
+        await ensure_personal_workspace(
+            self.db,
+            user_id=user.id,
+            user_email=user.email,
+            full_name=user.full_name,
+        )
         await self.db.commit()
 
         logger.info("User created", user_id=str(user.id), email=user.email)
