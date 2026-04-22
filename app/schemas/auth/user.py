@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 from app.models.auth.user import PlatformRole
+from app.schemas.auth.password_policy import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH
 
 
 class UserBase(BaseModel):
@@ -21,7 +22,9 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """Schema for user registration."""
 
-    password: Optional[str] = Field(None, min_length=8, max_length=100)
+    password: Optional[str] = Field(
+        None, min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -39,7 +42,9 @@ class UserUpdate(BaseModel):
 
     email: Optional[EmailStr] = None
     full_name: Optional[str] = Field(None, min_length=1, max_length=255)
-    password: Optional[str] = Field(None, min_length=8, max_length=100)
+    password: Optional[str] = Field(
+        None, min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH
+    )
     platform_role: Optional[PlatformRole] = None
     is_active: Optional[bool] = None
     is_verified: Optional[bool] = None

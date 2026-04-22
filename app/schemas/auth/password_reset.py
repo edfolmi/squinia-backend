@@ -7,6 +7,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
+from app.schemas.auth.password_policy import PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH
+
 
 class PasswordResetRequest(BaseModel):
     """Start reset from email (public)."""
@@ -18,7 +20,9 @@ class PasswordResetSubmit(BaseModel):
     """Consume token and set a new password (public)."""
 
     token: str = Field(..., min_length=1, max_length=512)
-    new_password: str = Field(..., min_length=8, max_length=100)
+    new_password: str = Field(
+        ..., min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH
+    )
 
 
 class PasswordResetResponse(BaseModel):

@@ -8,9 +8,12 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from app.core.config import settings
 
-
-# Password hashing context using bcrypt
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt_sha256: SHA-256 then bcrypt — supports passwords >72 bytes safely.
+# bcrypt: retained so existing $2b$ hashes keep verifying.
+pwd_context = CryptContext(
+    schemes=["bcrypt_sha256", "bcrypt"],
+    deprecated="auto",
+)
 
 
 class SecurityService:

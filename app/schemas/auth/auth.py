@@ -2,7 +2,9 @@
 Pydantic schemas for authentication.
 Handles login, token management, and registration flows.
 """
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
+
+from app.schemas.auth.password_policy import PASSWORD_MAX_LENGTH
 
 
 class Token(BaseModel):
@@ -32,7 +34,7 @@ class TokenPayload(BaseModel):
 class LoginRequest(BaseModel):
     """Login request schema."""
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=1, max_length=PASSWORD_MAX_LENGTH)
     
     model_config = ConfigDict(
         json_schema_extra={
