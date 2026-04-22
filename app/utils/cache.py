@@ -42,22 +42,18 @@ class CacheManager:
             logger.info("Redis connection closed")
     
     @property
+    def available(self) -> bool:
+        return self._redis is not None
+
+    @property
     def redis(self) -> redis.Redis:
-        """Get Redis client instance."""
         if self._redis is None:
             raise RuntimeError("Redis not connected. Call connect() first.")
         return self._redis
-    
+
     async def get(self, key: str) -> Optional[Any]:
-        """
-        Get value from cache.
-        
-        Args:
-            key: Cache key
-            
-        Returns:
-            Cached value or None if not found
-        """
+        if not self.available:
+            return None
         try:
             value = await self.redis.get(key)
             if value:
@@ -66,24 +62,10 @@ class CacheManager:
         except Exception as e:
             logger.error("Cache get error", key=key, error=str(e))
             return None
-    
-    async def set(
-        self,
-        key: str,
-        value: Any,
-        ttl: Optional[int] = None
-    ) -> bool:
-        """
-        Set value in cache with optional TTL.
-        
-        Args:
-            key: Cache key
-            value: Value to cache
-            ttl: Time to live in seconds (default from settings)
-            
-        Returns:
-            True if successful, False otherwise
-        """
+
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+        if not self.available:
+            return False
         try:
             ttl = ttl or settings.REDIS_CACHE_TTL
             serialized = json.dumps(value)
@@ -92,56 +74,34 @@ class CacheManager:
         except Exception as e:
             logger.error("Cache set error", key=key, error=str(e))
             return False
-    
+
     async def delete(self, key: str) -> bool:
-        """
-        Delete value from cache.
-        
-        Args:
-            key: Cache key
-            
-        Returns:
-            True if deleted, False otherwise
-        """
+        if not self.available:
+            return False
         try:
             result = await self.redis.delete(key)
             return result > 0
         except Exception as e:
             logger.error("Cache delete error", key=key, error=str(e))
             return False
-    
+
     async def delete_pattern(self, pattern: str) -> int:
-        """
-        Delete all keys matching pattern.
-        
-        Args:
-            pattern: Key pattern (e.g., "user:*")
-            
-        Returns:
-            Number of keys deleted
-        """
+        if not self.available:
+            return 0
         try:
             keys = []
             async for key in self.redis.scan_iter(match=pattern):
                 keys.append(key)
-            
             if keys:
                 return await self.redis.delete(*keys)
             return 0
         except Exception as e:
             logger.error("Cache pattern delete error", pattern=pattern, error=str(e))
             return 0
-    
+
     async def exists(self, key: str) -> bool:
-        """
-        Check if key exists in cache.
-        
-        Args:
-            key: Cache key
-            
-        Returns:
-            True if exists, False otherwise
-        """
+        if not self.available:
+            return False
         try:
             return await self.redis.exists(key) > 0
         except Exception as e:

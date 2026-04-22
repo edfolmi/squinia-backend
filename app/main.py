@@ -79,6 +79,43 @@ app.add_exception_handler(Exception, general_exception_handler)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 
+def _verify_cohort_list_route_or_raise(application: FastAPI) -> None:
+    """
+    Fail fast if another route (e.g. a stray ``GET /{tenant_id}``) shadows ``GET …/cohorts``.
+    If this passes but clients still see ``tenant_id`` / ``cohorts`` 422s, they are almost certainly
+    hitting a *different* process on the same URL (stale uvicorn on the port).
+    """
+    from starlette.routing import Match
+
+    probe_path = f"{settings.API_V1_PREFIX}/cohorts"
+    scope: dict = {
+        "type": "http",
+        "path": probe_path,
+        "method": "GET",
+        "headers": [],
+        "query_string": b"",
+    }
+    for route in application.router.routes:
+        m, _ = route.matches(scope)
+        if m != Match.FULL:
+            continue
+        endpoint = getattr(route, "endpoint", None)
+        name = getattr(endpoint, "__name__", None)
+        rpath = getattr(route, "path", None)
+        if name != "list_cohorts":
+            raise RuntimeError(
+                f"Route table is wrong: GET {probe_path!r} resolves to {name!r} (route.path={rpath!r}), "
+                "expected list_cohorts. Stop every uvicorn/python process, delete __pycache__ under app/, "
+                "then start again from squinia-backend."
+            )
+        logger.info("Route probe OK", probe=probe_path, handler=name)
+        return
+    raise RuntimeError(f"No route matched GET {probe_path!r} — cohorts router may be missing.")
+
+
+_verify_cohort_list_route_or_raise(app)
+
+
 @app.get("/", tags=["Health"])
 async def root():
     return ok({

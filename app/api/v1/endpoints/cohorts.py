@@ -30,6 +30,18 @@ async def create_cohort(
     return ok({"cohort": CohortResponse.model_validate(result["cohort"]).model_dump(mode="json")})
 
 
+async def _list_cohorts_paginated(
+    ctx: CohortReader,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    page: int,
+    limit: int,
+):
+    svc = CohortService(db)
+    result = await svc.list_paginated(ctx.tenant_id, page, limit)
+    items = [CohortResponse.model_validate(i).model_dump(mode="json") for i in result["items"]]
+    return ok_paginated(items, total=result["total"], page=result["page"], page_size=result["limit"])
+
+
 @router.get("")
 async def list_cohorts(
     ctx: CohortReader,
@@ -37,10 +49,22 @@ async def list_cohorts(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
 ):
-    svc = CohortService(db)
-    result = await svc.list_paginated(ctx.tenant_id, page, limit)
-    items = [CohortResponse.model_validate(i).model_dump(mode="json") for i in result["items"]]
-    return ok_paginated(items, total=result["total"], page=result["page"], page_size=result["limit"])
+    return await _list_cohorts_paginated(ctx, db, page, limit)
+
+
+@router.get("/list")
+async def list_cohorts_extra_segment(
+    ctx: CohortReader,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """
+    Same as ``GET /cohorts`` but with an extra path segment so a stray ``GET /{tenant_id}``
+    at the API root cannot steal the request (``cohorts`` is no longer the first segment alone).
+    Prefer this URL from clients when upgrading older deployments.
+    """
+    return await _list_cohorts_paginated(ctx, db, page, limit)
 
 
 @router.get("/{cohort_id}")

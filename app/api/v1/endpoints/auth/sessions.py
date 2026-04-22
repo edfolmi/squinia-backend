@@ -14,6 +14,7 @@ from app.schemas.auth.user import UserCreate, UserResponse
 from app.schemas.response import ok
 from app.services.auth import AuthService
 from app.services.auth_verification import AuthVerificationService
+from app.services.me import MeService
 from app.services.user import UserService
 
 router = APIRouter()
@@ -57,6 +58,16 @@ async def refresh_token(
 
 
 @router.get("/me")
-async def get_current_user_info(current_user: CurrentUser):
-    """Return the authenticated user."""
-    return ok({"user": UserResponse.model_validate(current_user).model_dump(mode="json")})
+async def get_current_user_info(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """
+    Current user plus org memberships for shell routing (learner vs org operator).
+
+    ``data.user`` includes ``onboarding`` and ``onboarding_completed_at``.
+    ``data.memberships`` lists active tenants with ``tenant_name`` / ``tenant_slug`` / ``org_role``.
+    ``data.default_tenant_id`` matches the first membership (same ordering as JWT default tenant).
+    """
+    me = await MeService(db).get_me(current_user)
+    return ok(me.model_dump(mode="json"))

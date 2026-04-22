@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.auth.membership import Membership, OrgRole
 
@@ -78,3 +79,17 @@ class MembershipRepository:
             .values(is_active=True, deleted_at=None),
         )
         await self.db.flush()
+
+    async def list_active_with_tenant(self, user_id: UUID) -> list[Membership]:
+        stmt = (
+            select(Membership)
+            .options(selectinload(Membership.tenant))
+            .where(
+                Membership.user_id == user_id,
+                Membership.deleted_at.is_(None),
+                Membership.is_active.is_(True),
+            )
+            .order_by(Membership.joined_at.asc())
+        )
+        r = await self.db.execute(stmt)
+        return list(r.scalars().unique().all())

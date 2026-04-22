@@ -43,9 +43,21 @@ class RubricReorderRequest(BaseModel):
 
 
 class SimulationSessionStartRequest(BaseModel):
-    scenario_id: UUID
-    cohort_id: Optional[UUID] = None
-    mode: SessionMode = SessionMode.TEXT
+    """
+    Start a persisted simulation session (call ``POST /api/v1/sessions`` before opening the sim UI).
+
+    ``tenant_id`` is taken from the access token, not the body.
+    """
+
+    scenario_id: UUID = Field(description="Published scenario to run.")
+    cohort_id: Optional[UUID] = Field(
+        default=None,
+        description="Cohort context; optional if the product allows free practice in-tenant.",
+    )
+    mode: SessionMode = Field(
+        default=SessionMode.TEXT,
+        description="Interaction mode for the session (e.g. TEXT).",
+    )
 
 
 class InternalEvalTriggerRequest(BaseModel):

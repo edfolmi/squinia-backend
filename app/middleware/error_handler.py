@@ -32,7 +32,16 @@ async def validation_exception_handler(
     request: Request, exc: RequestValidationError,
 ) -> JSONResponse:
     """Pydantic / FastAPI validation errors → 422 envelope."""
-    logger.warning("Validation error", path=request.url.path, errors=exc.errors())
+    route = request.scope.get("route")
+    route_path = getattr(route, "path", None) if route is not None else None
+    route_name = getattr(route, "name", None) if route is not None else None
+    logger.warning(
+        "Validation error",
+        path=request.url.path,
+        matched_route_path=route_path,
+        matched_route_name=route_name,
+        errors=exc.errors(),
+    )
     details = [
         ErrorDetail(
             field=".".join(str(loc) for loc in err.get("loc", [])),
