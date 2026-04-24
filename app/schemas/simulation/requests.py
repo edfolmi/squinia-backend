@@ -42,6 +42,10 @@ class RubricReorderRequest(BaseModel):
     ordered_ids: list[UUID] = Field(..., min_length=1)
 
 
+class SimulationSessionChatRequest(BaseModel):
+    text: str = Field(..., min_length=1, description="User message for the facilitator.")
+
+
 class SimulationSessionStartRequest(BaseModel):
     """
     Start a persisted simulation session (call ``POST /api/v1/sessions`` before opening the sim UI).

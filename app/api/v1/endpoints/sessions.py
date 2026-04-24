@@ -2,7 +2,7 @@
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,13 +10,22 @@ from app.db.session import get_db
 from app.schemas.response import ok, ok_paginated
 from app.schemas.simulation.evaluation import EvaluationResponse
 from app.schemas.simulation.message import MessageResponse
-from app.schemas.simulation.requests import SimulationSessionStartRequest
-from app.schemas.simulation.responses import EvaluationFullResponse, EvaluationScorePublic, SessionDetailResponse, SessionStartResponse
+from app.schemas.simulation.requests import SimulationSessionChatRequest, SimulationSessionStartRequest
+from app.schemas.simulation.responses import (
+    EvaluationFullResponse,
+    EvaluationScorePublic,
+    LiveKitConnectionResponse,
+    SessionChatResponse,
+    SessionDetailResponse,
+    SessionOpeningResponse,
+    SessionStartResponse,
+)
 from app.schemas.simulation.simulation_session import SimulationSessionResponse
 from app.core.tenant_access import TenantMember
 from app.core.exceptions import AppError
 from app.models.simulation.evaluation import EvalStatus
 from app.models.simulation.simulation_session import SessionStatus
+from app.services.ai.evaluation_runner import run_openai_evaluation_job
 from app.services.simulation.session import SessionService
 
 router = APIRouter(prefix="/sessions", tags=["Simulation Sessions"])
@@ -47,7 +56,6 @@ async def start_session(
     result = await svc.start_session(ctx.tenant_id, ctx.user.id, ctx.org_role, body)
     payload = SessionStartResponse(
         session_id=result["session_id"],
-        ws_token=result["ws_token"],
         scenario_snapshot=result["scenario_snapshot"],
     ).model_dump(mode="json")
     return ok(payload)
@@ -72,6 +80,43 @@ async def list_sessions(
     result = await svc.list_sessions(ctx.tenant_id, ctx.user.id, ctx.org_role, page, limit, status=st, cohort_id=cohort_id)
     items = [SimulationSessionResponse.model_validate(i).model_dump(mode="json") for i in result["items"]]
     return ok_paginated(items, total=result["total"], page=result["page"], page_size=result["limit"])
+
+
+@router.post("/{session_id}/livekit-token", status_code=status.HTTP_200_OK)
+async def issue_livekit_token(
+    session_id: UUID,
+    ctx: TenantMember,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    svc = SessionService(db)
+    result = await svc.issue_livekit_token(ctx.tenant_id, session_id, ctx.user.id, ctx.org_role)
+    payload = LiveKitConnectionResponse(**result).model_dump(mode="json")
+    return ok(payload)
+
+
+@router.post("/{session_id}/opening", status_code=status.HTTP_200_OK)
+async def post_session_opening(
+    session_id: UUID,
+    ctx: TenantMember,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """TEXT: facilitator speaks first from the scenario (idempotent if already stored)."""
+    svc = SessionService(db)
+    result = await svc.post_text_opening(ctx.tenant_id, session_id, ctx.user.id, ctx.org_role)
+    return ok(SessionOpeningResponse(**result).model_dump(mode="json"))
+
+
+@router.post("/{session_id}/chat", status_code=status.HTTP_200_OK)
+async def send_session_chat(
+    session_id: UUID,
+    body: SimulationSessionChatRequest,
+    ctx: TenantMember,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """TEXT: one HTTP request per user message; full assistant reply in JSON (twin-style)."""
+    svc = SessionService(db)
+    result = await svc.send_text_chat(ctx.tenant_id, session_id, ctx.user.id, ctx.org_role, body.text)
+    return ok(SessionChatResponse(**result).model_dump(mode="json"))
 
 
 @router.get("/{session_id}")
@@ -100,9 +145,11 @@ async def end_session(
     session_id: UUID,
     ctx: TenantMember,
     db: Annotated[AsyncSession, Depends(get_db)],
+    background_tasks: BackgroundTasks,
 ):
     svc = SessionService(db)
     result = await svc.end_session(ctx.tenant_id, session_id, ctx.user.id, ctx.org_role)
+    background_tasks.add_task(run_openai_evaluation_job, session_id)
     return ok({"session": SimulationSessionResponse.model_validate(result["session"]).model_dump(mode="json")})
 
 

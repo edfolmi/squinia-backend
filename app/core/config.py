@@ -63,6 +63,16 @@ class Settings(BaseSettings):
     
     # Logging
     LOG_LEVEL: str = "INFO"
+
+    # OpenAI — chat simulations (WebSocket) + evaluation jobs
+    OPENROUTER_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
+    OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
+
+    # LiveKit Cloud — participant tokens for phone/video (worker: integration/voice_agent_workshop)
+    LIVEKIT_URL: str = ""
+    LIVEKIT_API_KEY: str = ""
+    LIVEKIT_API_SECRET: str = ""
     
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

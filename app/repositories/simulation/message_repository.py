@@ -1,7 +1,7 @@
 """Session message persistence."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -28,3 +28,10 @@ class MessageRepository:
         r = await self.db.execute(stmt)
         v = r.scalar_one_or_none()
         return int(v or 0)
+
+    async def create(self, data: dict[str, Any]) -> Message:
+        row = Message(**data)
+        self.db.add(row)
+        await self.db.flush()
+        await self.db.refresh(row)
+        return row

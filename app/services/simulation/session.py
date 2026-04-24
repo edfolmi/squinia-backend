@@ -8,12 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AppError
 from app.core.logging import get_logger
-from app.core.security import security_service
 from app.models.auth.membership import OrgRole
 from app.models.simulation.evaluation import EvalStatus
 from app.models.simulation.scenario import ScenarioStatus
-from app.models.simulation.simulation_session import SessionStatus, SimulationSession
+from app.models.simulation.simulation_session import SessionMode, SessionStatus, SimulationSession
 from app.repositories.simulation import CohortRepository, EvaluationRepository, MessageRepository, ScenarioRepository, SessionRepository
+from app.services.ai.text_simulation_chat import complete_text_chat_turn, complete_text_opening_turn
 from app.schemas.simulation.requests import SimulationSessionStartRequest
 
 logger = get_logger(__name__)
@@ -88,11 +88,9 @@ class SessionService:
             },
         )
         await self.db.commit()
-        ws_token = security_service.create_ws_session_token(str(session.id), str(user_id))
         logger.info("Session started", session_id=str(session.id), user_id=str(user_id))
         return {
             "session_id": session.id,
-            "ws_token": ws_token,
             "scenario_snapshot": snapshot,
         }
 
@@ -212,6 +210,37 @@ class SessionService:
         items = await self.messages.list_for_session(session_id)
         return {"items": items, "total": len(items)}
 
+    async def issue_livekit_token(
+        self,
+        tenant_id: UUID,
+        session_id: UUID,
+        user_id: UUID,
+        org_role: OrgRole,
+    ) -> dict:
+        """Return LiveKit server URL, room name, and participant JWT for VOICE/VIDEO sessions."""
+        row = await self.sessions.get(session_id, tenant_id)
+        if not row:
+            raise AppError(status_code=404, code="NOT_FOUND", message="Session not found")
+        self._assert_session_access(row, user_id, org_role)
+        if row.mode not in (SessionMode.VOICE, SessionMode.VIDEO):
+            raise AppError(
+                status_code=400,
+                code="SESSION_MODE_NOT_LIVEKIT",
+                message="LiveKit tokens are only issued for VOICE or VIDEO sessions.",
+            )
+        from app.services.ai.livekit_access import issue_livekit_participant_token
+
+        server_url, room_name, participant_token = issue_livekit_participant_token(
+            session_id=session_id,
+            user_id=user_id,
+            display_name="Learner",
+        )
+        return {
+            "server_url": server_url,
+            "room_name": room_name,
+            "participant_token": participant_token,
+        }
+
     async def evaluation_status(
         self,
         tenant_id: UUID,
@@ -235,3 +264,68 @@ class SessionService:
         if ev.status == EvalStatus.FAILED:
             return 200, {"evaluation": ev, "status": ev.status.value}
         return 200, {"evaluation": ev, "status": ev.status.value}
+
+    async def send_text_chat(
+        self,
+        tenant_id: UUID,
+        session_id: UUID,
+        user_id: UUID,
+        org_role: OrgRole,
+        text: str,
+    ) -> dict:
+        stripped = (text or "").strip()
+        if not stripped:
+            raise AppError(status_code=422, code="EMPTY_MESSAGE", message="Message text is required.")
+        row = await self.sessions.get(session_id, tenant_id)
+        if not row:
+            raise AppError(status_code=404, code="NOT_FOUND", message="Session not found")
+        self._assert_session_access(row, user_id, org_role)
+        if row.user_id != user_id:
+            raise AppError(
+                status_code=403,
+                code="FORBIDDEN",
+                message="Only the session owner can send chat messages.",
+            )
+        if row.status != SessionStatus.IN_PROGRESS:
+            raise AppError(status_code=400, code="SESSION_ENDED", message="Session is not active.")
+        if row.mode != SessionMode.TEXT:
+            raise AppError(
+                status_code=400,
+                code="WRONG_MODE",
+                message="Chat is only for TEXT sessions; use LiveKit for voice/video.",
+            )
+        return await complete_text_chat_turn(
+            self.db,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+            user_text=stripped,
+        )
+
+    async def post_text_opening(
+        self,
+        tenant_id: UUID,
+        session_id: UUID,
+        user_id: UUID,
+        org_role: OrgRole,
+    ) -> dict:
+        row = await self.sessions.get(session_id, tenant_id)
+        if not row:
+            raise AppError(status_code=404, code="NOT_FOUND", message="Session not found")
+        self._assert_session_access(row, user_id, org_role)
+        if row.user_id != user_id:
+            raise AppError(
+                status_code=403,
+                code="FORBIDDEN",
+                message="Only the session owner can start the conversation.",
+            )
+        if row.status != SessionStatus.IN_PROGRESS:
+            raise AppError(status_code=400, code="SESSION_ENDED", message="Session is not active.")
+        if row.mode != SessionMode.TEXT:
+            raise AppError(status_code=400, code="WRONG_MODE", message="Opening is only for TEXT sessions.")
+        return await complete_text_opening_turn(
+            self.db,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+        )

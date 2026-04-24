@@ -3,9 +3,8 @@ Main FastAPI application.
 Configures the application with middleware, routes, and lifecycle events.
 """
 from contextlib import asynccontextmanager
-from uuid import UUID
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -25,8 +24,6 @@ from app.middleware.error_handler import (
     general_exception_handler,
 )
 from app.schemas.response import ok
-from app.core.security import security_service
-from app.repositories.simulation import SessionRepository
 
 configure_logging()
 logger = get_logger(__name__)
@@ -132,58 +129,6 @@ async def health_check():
         "status": "healthy",
         "environment": settings.ENVIRONMENT,
     })
-
-
-@app.websocket(f"{settings.API_V1_PREFIX}/ws/sessions/{{session_id}}")
-async def simulation_session_ws(
-    websocket: WebSocket,
-    session_id: UUID,
-    token: str = Query(..., description="Short-lived ws_session JWT from POST /sessions"),
-):
-    """
-    Live simulation stream (minimal protocol stub).
-
-    Client frames use ``type`` + ``data`` / ``error`` as documented in AGENT.md.
-    """
-    payload = security_service.decode_ws_session_token(token)
-    if not payload or str(payload.get("session_id")) != str(session_id):
-        await websocket.close(code=4401)
-        return
-
-    async with db_manager.session_factory() as db:
-        repo = SessionRepository(db)
-        row = await repo.get_by_id(session_id)
-        if not row or str(row.user_id) != str(payload.get("sub")):
-            await websocket.close(code=4403)
-            return
-
-    await websocket.accept()
-    try:
-        while True:
-            raw = await websocket.receive_json()
-            msg_type = raw.get("type")
-            if msg_type == "USER_MESSAGE":
-                await websocket.send_json(
-                    {
-                        "type": "ASSISTANT_TOKEN",
-                        "data": {"token": "[stub]"},
-                    },
-                )
-                await websocket.send_json(
-                    {
-                        "type": "ASSISTANT_DONE",
-                        "data": {"turn_number": raw.get("data", {}).get("turn_number", 0)},
-                    },
-                )
-            else:
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "error": {"code": "UNKNOWN_MESSAGE_TYPE", "message": f"Unsupported type: {msg_type}"},
-                    },
-                )
-    except WebSocketDisconnect:
-        return
 
 
 if __name__ == "__main__":

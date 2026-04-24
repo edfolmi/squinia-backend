@@ -38,8 +38,26 @@ class SessionDetailResponse(SimulationSessionResponse):
 
 class SessionStartResponse(BaseModel):
     session_id: UUID
-    ws_token: str
     scenario_snapshot: dict[str, Any]
+
+
+class SessionChatResponse(BaseModel):
+    assistant_content: str
+    user_turn: int
+    assistant_turn: int
+
+
+class SessionOpeningResponse(BaseModel):
+    assistant_content: str
+    assistant_turn: int
+
+
+class LiveKitConnectionResponse(BaseModel):
+    """Credentials for `@livekit/components-react` / `livekit-client` in the browser."""
+
+    server_url: str
+    room_name: str
+    participant_token: str
 
 
 class CohortMemberProgressRow(BaseModel):

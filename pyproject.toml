@@ -22,4 +22,6 @@ dependencies = [
     "structlog>=25.5.0",
     "tzdata>=2026.1",
     "uvicorn[standard]>=0.44.0",
+    "openai>=1.66.0",
+    "livekit-api>=0.8.0",
 ]
