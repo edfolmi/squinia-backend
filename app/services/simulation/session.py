@@ -9,12 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.models.auth.membership import OrgRole
+from app.models.simulation.message import MessageRole
 from app.models.simulation.evaluation import EvalStatus
 from app.models.simulation.scenario import ScenarioStatus
 from app.models.simulation.simulation_session import SessionMode, SessionStatus, SimulationSession
 from app.repositories.simulation import CohortRepository, EvaluationRepository, MessageRepository, ScenarioRepository, SessionRepository
+from app.services.ai.livekit_access import close_livekit_room, dispatch_livekit_agent
 from app.services.ai.text_simulation_chat import complete_text_chat_turn, complete_text_opening_turn
-from app.schemas.simulation.requests import SimulationSessionStartRequest
+from app.schemas.simulation.requests import SimulationSessionStartRequest, SimulationSessionTranscriptIngestRequest
 
 logger = get_logger(__name__)
 
@@ -87,6 +89,8 @@ class SessionService:
                 "started_at": now,
             },
         )
+        if body.mode in (SessionMode.VOICE, SessionMode.VIDEO):
+            await dispatch_livekit_agent(session.id)
         await self.db.commit()
         logger.info("Session started", session_id=str(session.id), user_id=str(user_id))
         return {
@@ -183,6 +187,8 @@ class SessionService:
                 },
             )
         await self.db.commit()
+        if row.mode in (SessionMode.VOICE, SessionMode.VIDEO):
+            await close_livekit_room(session_id)
         logger.info("Session completed", session_id=str(session_id))
         return {"session": await self.sessions.get(session_id, tenant_id)}
 
@@ -200,6 +206,8 @@ class SessionService:
             {"status": SessionStatus.ABANDONED, "ended_at": now},
         )
         await self.db.commit()
+        if row.mode in (SessionMode.VOICE, SessionMode.VIDEO):
+            await close_livekit_room(session_id)
         return {"session": await self.sessions.get(session_id, tenant_id)}
 
     async def list_messages(self, tenant_id: UUID, session_id: UUID, user_id: UUID, org_role: OrgRole) -> dict:
@@ -264,6 +272,82 @@ class SessionService:
         if ev.status == EvalStatus.FAILED:
             return 200, {"evaluation": ev, "status": ev.status.value}
         return 200, {"evaluation": ev, "status": ev.status.value}
+
+    async def ingest_live_transcript(
+        self,
+        tenant_id: UUID,
+        session_id: UUID,
+        user_id: UUID,
+        org_role: OrgRole,
+        body: SimulationSessionTranscriptIngestRequest,
+    ) -> dict:
+        row = await self.sessions.get(session_id, tenant_id)
+        if not row:
+            raise AppError(status_code=404, code="NOT_FOUND", message="Session not found")
+        self._assert_session_access(row, user_id, org_role)
+        if row.user_id != user_id:
+            raise AppError(
+                status_code=403,
+                code="FORBIDDEN",
+                message="Only the session owner can ingest transcript events.",
+            )
+        if row.status != SessionStatus.IN_PROGRESS:
+            raise AppError(status_code=400, code="SESSION_ENDED", message="Session is not active.")
+        if row.mode not in (SessionMode.VOICE, SessionMode.VIDEO):
+            raise AppError(
+                status_code=400,
+                code="WRONG_MODE",
+                message="Transcript ingestion is only available for VOICE/VIDEO sessions.",
+            )
+
+        existing = await self.messages.list_for_session(session_id)
+        seen_segment_ids: set[str] = set()
+        for m in existing:
+            meta = m.meta or {}
+            seg = meta.get("segment_id")
+            if isinstance(seg, str) and seg:
+                seen_segment_ids.add(seg)
+
+        turn = await self.messages.get_max_turn(session_id)
+        accepted = 0
+        skipped = 0
+        for item in body.items:
+            text = (item.text or "").strip()
+            if not text or not item.is_final:
+                skipped += 1
+                continue
+
+            if item.segment_id and item.segment_id in seen_segment_ids:
+                skipped += 1
+                continue
+
+            turn += 1
+            role = MessageRole.USER if item.role == "USER" else MessageRole.ASSISTANT
+            await self.messages.create(
+                {
+                    "session_id": session_id,
+                    "role": role,
+                    "content": text,
+                    "content_type": "transcript",
+                    "meta": {
+                        "source": "livekit_transcript",
+                        "segment_id": item.segment_id,
+                        "participant_identity": item.participant_identity,
+                        "participant_name": item.participant_name,
+                        "offset_ms": item.offset_ms,
+                    },
+                    "turn_number": turn,
+                },
+            )
+            if item.segment_id:
+                seen_segment_ids.add(item.segment_id)
+            accepted += 1
+
+        if accepted > 0:
+            await self.sessions.update(session_id, row.tenant_id, {"turn_count": turn})
+            await self.db.commit()
+
+        return {"accepted": accepted, "skipped": skipped, "turn_count": turn}
 
     async def send_text_chat(
         self,

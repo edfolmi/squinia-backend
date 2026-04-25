@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -44,6 +44,27 @@ class RubricReorderRequest(BaseModel):
 
 class SimulationSessionChatRequest(BaseModel):
     text: str = Field(..., min_length=1, description="User message for the facilitator.")
+
+
+class SimulationSessionTranscriptItem(BaseModel):
+    role: Literal["USER", "ASSISTANT"] = Field(description="Speaker role inferred from LiveKit participant.")
+    text: str = Field(..., min_length=1, description="Final transcript text.")
+    segment_id: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        description="Stable id from LiveKit transcript segment for de-duplication.",
+    )
+    participant_identity: Optional[str] = Field(default=None, max_length=255)
+    participant_name: Optional[str] = Field(default=None, max_length=255)
+    offset_ms: Optional[int] = Field(default=None, ge=0)
+    is_final: bool = Field(
+        default=True,
+        description="Only final transcript segments should be persisted.",
+    )
+
+
+class SimulationSessionTranscriptIngestRequest(BaseModel):
+    items: list[SimulationSessionTranscriptItem] = Field(..., min_length=1, max_length=100)
 
 
 class SimulationSessionStartRequest(BaseModel):

@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     LIVEKIT_URL: str = ""
     LIVEKIT_API_KEY: str = ""
     LIVEKIT_API_SECRET: str = ""
+    LIVEKIT_AGENT_NAME: str = "squinia-voice-agent"
     
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

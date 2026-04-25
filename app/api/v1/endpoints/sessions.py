@@ -10,7 +10,11 @@ from app.db.session import get_db
 from app.schemas.response import ok, ok_paginated
 from app.schemas.simulation.evaluation import EvaluationResponse
 from app.schemas.simulation.message import MessageResponse
-from app.schemas.simulation.requests import SimulationSessionChatRequest, SimulationSessionStartRequest
+from app.schemas.simulation.requests import (
+    SimulationSessionChatRequest,
+    SimulationSessionStartRequest,
+    SimulationSessionTranscriptIngestRequest,
+)
 from app.schemas.simulation.responses import (
     EvaluationFullResponse,
     EvaluationScorePublic,
@@ -19,6 +23,7 @@ from app.schemas.simulation.responses import (
     SessionDetailResponse,
     SessionOpeningResponse,
     SessionStartResponse,
+    SessionTranscriptIngestResponse,
 )
 from app.schemas.simulation.simulation_session import SimulationSessionResponse
 from app.core.tenant_access import TenantMember
@@ -117,6 +122,19 @@ async def send_session_chat(
     svc = SessionService(db)
     result = await svc.send_text_chat(ctx.tenant_id, session_id, ctx.user.id, ctx.org_role, body.text)
     return ok(SessionChatResponse(**result).model_dump(mode="json"))
+
+
+@router.post("/{session_id}/transcript", status_code=status.HTTP_200_OK)
+async def ingest_session_transcript(
+    session_id: UUID,
+    body: SimulationSessionTranscriptIngestRequest,
+    ctx: TenantMember,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """VOICE/VIDEO: ingest finalized transcript segments captured from LiveKit."""
+    svc = SessionService(db)
+    result = await svc.ingest_live_transcript(ctx.tenant_id, session_id, ctx.user.id, ctx.org_role, body)
+    return ok(SessionTranscriptIngestResponse(**result).model_dump(mode="json"))
 
 
 @router.get("/{session_id}")

@@ -60,6 +60,12 @@ class LiveKitConnectionResponse(BaseModel):
     participant_token: str
 
 
+class SessionTranscriptIngestResponse(BaseModel):
+    accepted: int
+    skipped: int
+    turn_count: int
+
+
 class CohortMemberProgressRow(BaseModel):
     user_id: UUID
     scores: dict[str, float] = Field(default_factory=dict)
