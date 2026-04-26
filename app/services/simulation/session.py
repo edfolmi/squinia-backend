@@ -299,7 +299,9 @@ class SessionService:
                 code="FORBIDDEN",
                 message="Only the session owner can ingest transcript events.",
             )
-        if row.status != SessionStatus.IN_PROGRESS:
+        # LiveKit can deliver a final transcript segment immediately after the
+        # browser finishes the session. Keep accepting those late final chunks.
+        if row.status not in (SessionStatus.IN_PROGRESS, SessionStatus.COMPLETED):
             raise AppError(status_code=400, code="SESSION_ENDED", message="Session is not active.")
         if row.mode not in (SessionMode.VOICE, SessionMode.VIDEO):
             raise AppError(
