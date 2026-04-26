@@ -3,6 +3,7 @@ Redis cache utility for performance optimization.
 Implements caching strategies for read-heavy operations.
 """
 import json
+import asyncio
 from typing import Optional, Any, Callable
 from functools import wraps
 import redis.asyncio as redis
@@ -24,21 +25,29 @@ class CacheManager:
     async def connect(self) -> None:
         """Initialize Redis connection."""
         try:
-            self._redis = await redis.from_url(
+            client = redis.from_url(
                 str(settings.REDIS_URL),
                 encoding="utf-8",
-                decode_responses=True
+                decode_responses=True,
+                socket_connect_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
+                socket_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
             )
-            await self._redis.ping()
+            await asyncio.wait_for(client.ping(), timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS)
+            self._redis = client
             logger.info("Redis connection established")
         except Exception as e:
             logger.error("Failed to connect to Redis", error=str(e))
+            try:
+                if "client" in locals():
+                    await client.aclose()
+            except Exception:
+                pass
             self._redis = None
     
     async def close(self) -> None:
         """Close Redis connection."""
         if self._redis:
-            await self._redis.close()
+            await self._redis.aclose()
             logger.info("Redis connection closed")
     
     @property

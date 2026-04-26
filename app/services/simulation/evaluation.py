@@ -140,6 +140,9 @@ class EvaluationService:
                     "rubric_item_id": item.rubric_item_id,
                     "score": item.score,
                     "rationale": item.rationale,
+                    "summary": item.summary,
+                    "example_quote": item.example_quote,
+                    "improvement": item.improvement,
                 },
             )
         await self.evaluations.update(

@@ -44,6 +44,9 @@ class EvaluationScore(Base):
     )
     score: Mapped[int] = mapped_column(Integer, nullable=False)
     rationale: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    example_quote: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    improvement: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     evaluation: Mapped["Evaluation"] = relationship("Evaluation", back_populates="scores")
     rubric_item: Mapped["ScenarioRubricItem"] = relationship("ScenarioRubricItem", back_populates="evaluation_scores")

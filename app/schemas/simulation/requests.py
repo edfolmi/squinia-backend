@@ -93,6 +93,9 @@ class EvalScoreCompleteItem(BaseModel):
     rubric_item_id: UUID
     score: int = Field(..., ge=0)
     rationale: Optional[str] = None
+    summary: Optional[str] = None
+    example_quote: Optional[str] = None
+    improvement: Optional[str] = None
 
 
 class InternalEvalCompleteRequest(BaseModel):

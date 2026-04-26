@@ -43,6 +43,9 @@ class LiveKitWorkerManager:
         if not settings.LIVEKIT_WORKER_AUTOSTART:
             logger.info("LiveKit worker autostart disabled")
             return
+        if settings.DEBUG and not settings.LIVEKIT_WORKER_AUTOSTART_WITH_RELOAD:
+            logger.info("LiveKit worker autostart skipped in DEBUG mode")
+            return
         if self._proc and self._proc.poll() is None:
             logger.info("LiveKit worker already running", pid=self._proc.pid)
             return

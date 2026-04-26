@@ -23,6 +23,9 @@ class EvaluationScorePublic(BaseModel):
     score: int
     max_score: int
     rationale: Optional[str] = None
+    summary: Optional[str] = None
+    example_quote: Optional[str] = None
+    improvement: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

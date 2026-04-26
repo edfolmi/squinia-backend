@@ -36,9 +36,10 @@ class AuthService:
         return claims
 
     async def authenticate_user(self, email: str, password: str) -> Optional[User]:
-        user = await self.user_repo.get_by_email(email)
+        normalized_email = email.strip().lower()
+        user = await self.user_repo.get_by_email_lower(normalized_email)
         if not user:
-            logger.warning("Authentication failed: user not found", email=email)
+            logger.warning("Authentication failed: user not found", email=normalized_email)
             return None
         if user.deleted_at is not None:
             logger.warning("Authentication failed: deleted user", email=email)
@@ -47,13 +48,13 @@ class AuthService:
             logger.warning("Authentication failed: SSO-only user", email=email)
             return None
         if not security_service.verify_password(password, user.password_hash):
-            logger.warning("Authentication failed: invalid password", email=email)
+            logger.warning("Authentication failed: invalid password", email=normalized_email)
             return None
         if not user.is_active:
             logger.warning("Authentication failed: inactive user", email=email)
             return None
 
-        logger.info("User authenticated", user_id=str(user.id), email=email)
+        logger.info("User authenticated", user_id=str(user.id), email=normalized_email)
         return user
 
     async def build_login_bundle(self, user: User) -> dict:

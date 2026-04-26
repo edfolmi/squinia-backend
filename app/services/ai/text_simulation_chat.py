@@ -12,25 +12,9 @@ from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.models.simulation.message import MessageRole
 from app.repositories.simulation import MessageRepository, SessionRepository
+from app.services.ai.scenario_prompt import system_prompt_from_snapshot
 
 logger = get_logger(__name__)
-
-
-def _system_prompt_from_snapshot(snapshot: dict[str, Any] | None) -> str:
-    snap = snapshot or {}
-    title = snap.get("title") or "Simulation"
-    desc = (snap.get("description") or "").strip()
-    cfg = snap.get("config") if isinstance(snap.get("config"), dict) else {}
-    learner = (cfg.get("learner_role") or "").strip()
-    notes = (cfg.get("config_notes") or "").strip()
-    parts = [
-        f"You are the AI facilitator for a structured workplace simulation titled: {title}.",
-        f"Scenario description: {desc}" if desc else "",
-        f"The learner is playing the role of: {learner}." if learner else "",
-        f"Room constraints and policy: {notes}" if notes else "",
-        "Stay in character, be concise, and ask one clear follow-up at a time unless the learner closes the topic.",
-    ]
-    return "\n".join(p for p in parts if p)
 
 
 async def complete_text_opening_turn(
@@ -73,7 +57,7 @@ async def complete_text_opening_turn(
         }
 
     snap = row.scenario_snapshot if isinstance(row.scenario_snapshot, dict) else None
-    base = _system_prompt_from_snapshot(snap)
+    base = system_prompt_from_snapshot(snap)
     opener_system = (
         base
         + "\n\nThe learner has just entered. You speak first: one in-character opening that fits the scenario. "
@@ -170,7 +154,7 @@ async def complete_text_chat_turn(
     user_turn = max_t + 1
     assistant_turn = max_t + 2
     snap = row.scenario_snapshot if isinstance(row.scenario_snapshot, dict) else None
-    system_prompt = _system_prompt_from_snapshot(snap)
+    system_prompt = system_prompt_from_snapshot(snap)
 
     await messages.create(
         {

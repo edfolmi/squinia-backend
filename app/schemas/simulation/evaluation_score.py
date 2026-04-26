@@ -12,6 +12,9 @@ class EvaluationScoreBase(BaseModel):
 
     score: int = Field(..., ge=0)
     rationale: Optional[str] = None
+    summary: Optional[str] = None
+    example_quote: Optional[str] = None
+    improvement: Optional[str] = None
 
 
 class EvaluationScoreCreate(EvaluationScoreBase):

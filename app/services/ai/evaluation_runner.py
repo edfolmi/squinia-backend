@@ -1,7 +1,7 @@
-"""Background evaluation using OpenAI (JSON rubric scores) — GPT-4o-mini."""
+"""Agentic scenario evaluation using the OpenAI Agents SDK over OpenRouter."""
 from __future__ import annotations
 
-import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import db_manager
 from app.models.simulation.evaluation import EvalStatus
+from app.models.simulation.message import MessageRole
 from app.repositories.simulation import EvaluationRepository, MessageRepository, SessionRepository
 from app.schemas.simulation.requests import EvalScoreCompleteItem, InternalEvalCompleteRequest
 from app.services.simulation.evaluation import EvaluationService
@@ -19,41 +20,334 @@ from app.services.simulation.evaluation import EvaluationService
 logger = get_logger(__name__)
 
 
-class _LLMScoreItem(BaseModel):
+class _TranscriptTurn(BaseModel):
+    id: str
+    role: str
+    text: str
+    offset_ms: int | None = None
+    source_message_ids: list[str] = Field(default_factory=list)
+
+
+class _RubricItem(BaseModel):
+    id: str
+    criterion: str
+    description: str = ""
+    max_score: int = 5
+
+
+class _ScoreDraftItem(BaseModel):
     rubric_item_id: str
     score: int = Field(..., ge=0)
-    rationale: str | None = None
+    summary: str
 
 
-class _LLMEvalPayload(BaseModel):
+class _ScoreDraftPayload(BaseModel):
     overall_score: int = Field(..., ge=0, le=100)
     feedback_summary: str
     strengths: str | None = None
     improvements: str | None = None
-    scores: list[_LLMScoreItem] = Field(default_factory=list)
+    scores: list[_ScoreDraftItem] = Field(default_factory=list)
 
 
-def _transcript_from_messages(messages: list[Any]) -> str:
-    lines: list[str] = []
-    for m in messages:
-        role = getattr(m.role, "value", m.role)
-        lines.append(f"{role}: {m.content}")
-    return "\n".join(lines) if lines else "(no transcript)"
+class _EvidenceItem(BaseModel):
+    rubric_item_id: str
+    quote_turn_id: str | None = None
+    example_quote: str
+    improvement: str
 
 
-def _rubric_block(snapshot: dict[str, Any] | None) -> str:
-    snap = snapshot or {}
-    rubric = snap.get("rubric") if isinstance(snap.get("rubric"), list) else []
-    parts: list[str] = []
-    for item in rubric:
-        if not isinstance(item, dict):
+class _EvidencePayload(BaseModel):
+    items: list[_EvidenceItem] = Field(default_factory=list)
+
+
+class _FinalScoreItem(BaseModel):
+    rubric_item_id: str
+    score: int = Field(..., ge=0)
+    rationale: str
+    summary: str
+    quote_turn_id: str | None = None
+    example_quote: str
+    improvement: str
+
+
+class _FinalEvalPayload(BaseModel):
+    overall_score: int = Field(..., ge=0, le=100)
+    feedback_summary: str
+    strengths: str | None = None
+    improvements: str | None = None
+    reviewer_notes: str | None = None
+    scores: list[_FinalScoreItem] = Field(default_factory=list)
+
+
+_SPACE_RE = re.compile(r"\s+")
+
+
+def _clean_text(value: Any) -> str:
+    return _SPACE_RE.sub(" ", str(value or "").strip())
+
+
+def _normalized(value: str) -> str:
+    return _SPACE_RE.sub(" ", value.strip()).lower()
+
+
+def _join_turn_text(left: str, right: str) -> str:
+    left = left.strip()
+    right = right.strip()
+    if not left:
+        return right
+    if not right:
+        return left
+    sep = " " if left.endswith((".", "!", "?", ":", ";", ",")) else ", "
+    return f"{left}{sep}{right}"
+
+
+def _message_offset_ms(message: Any) -> int | None:
+    meta = getattr(message, "meta", None) or {}
+    raw = meta.get("offset_ms") if isinstance(meta, dict) else None
+    if isinstance(raw, int) and raw >= 0:
+        return raw
+    return None
+
+
+def _transcript_turns_from_messages(messages: list[Any]) -> list[_TranscriptTurn]:
+    turns: list[_TranscriptTurn] = []
+    for message in messages:
+        role = getattr(message.role, "value", message.role)
+        if role not in (MessageRole.USER.value, MessageRole.ASSISTANT.value, "USER", "ASSISTANT"):
             continue
-        rid = item.get("id", "")
-        crit = item.get("criterion", "criterion")
-        mx = item.get("max_score", 5)
-        desc = (item.get("description") or "").strip()
-        parts.append(f"- id={rid} | {crit} | max_score={mx} | {desc}")
-    return "\n".join(parts) if parts else "(no rubric — give overall_score and qualitative feedback only; scores may be empty)"
+        text = _clean_text(getattr(message, "content", ""))
+        if not text:
+            continue
+        message_id = str(getattr(message, "id", len(turns) + 1))
+        role_str = "USER" if str(role) == "USER" else "ASSISTANT"
+        if turns and turns[-1].role == role_str:
+            prev = turns[-1]
+            turns[-1] = _TranscriptTurn(
+                id=prev.id,
+                role=prev.role,
+                text=_join_turn_text(prev.text, text),
+                offset_ms=prev.offset_ms,
+                source_message_ids=[*prev.source_message_ids, message_id],
+            )
+            continue
+        turns.append(
+            _TranscriptTurn(
+                id=f"turn-{len(turns) + 1}",
+                role=role_str,
+                text=text,
+                offset_ms=_message_offset_ms(message),
+                source_message_ids=[message_id],
+            )
+        )
+    return turns
+
+
+def _transcript_block(turns: list[_TranscriptTurn]) -> str:
+    if not turns:
+        return "(no transcript)"
+    return "\n".join(f"{turn.id} | {turn.role}: {turn.text}" for turn in turns)
+
+
+def _quote_bank(turns: list[_TranscriptTurn]) -> str:
+    learner_turns = [t for t in turns if t.role == "USER"]
+    if not learner_turns:
+        return "(no learner turns)"
+    return "\n".join(f"{t.id}: {t.text}" for t in learner_turns)
+
+
+def _rubric_items(snapshot: dict[str, Any] | None) -> list[_RubricItem]:
+    snap = snapshot or {}
+    raw_items = snap.get("rubric") if isinstance(snap.get("rubric"), list) else []
+    out: list[_RubricItem] = []
+    for item in raw_items:
+        if not isinstance(item, dict) or not item.get("id"):
+            continue
+        try:
+            max_score = int(item.get("max_score") or 5)
+        except (TypeError, ValueError):
+            max_score = 5
+        out.append(
+            _RubricItem(
+                id=str(item["id"]),
+                criterion=_clean_text(item.get("criterion") or "Criterion"),
+                description=_clean_text(item.get("description") or ""),
+                max_score=max(1, max_score),
+            )
+        )
+    return out
+
+
+def _rubric_block(items: list[_RubricItem]) -> str:
+    if not items:
+        return "(no rubric - provide overall feedback only)"
+    return "\n".join(
+        f"- id={item.id} | {item.criterion} | max_score={item.max_score} | {item.description}"
+        for item in items
+    )
+
+
+def _scenario_block(snapshot: dict[str, Any] | None) -> str:
+    snap = snapshot or {}
+    cfg = snap.get("config") if isinstance(snap.get("config"), dict) else {}
+    parts = [
+        f"Title: {_clean_text(snap.get('title'))}",
+        f"Description: {_clean_text(snap.get('description'))}",
+        f"Agent role: {_clean_text(snap.get('agent_role'))}",
+        f"Learner role: {_clean_text(cfg.get('learner_role'))}",
+        f"Scenario notes: {_clean_text(cfg.get('config_notes'))}",
+        f"Success criteria: {_clean_text(cfg.get('success_criteria'))}",
+    ]
+    return "\n".join(p for p in parts if not p.endswith(": "))
+
+
+async def _run_agent(agent: Any, text: str) -> Any:
+    from agents import Runner
+
+    result = await Runner.run(agent, input=text)
+    return result.final_output
+
+
+async def _agentic_evaluate(
+    *,
+    client: Any,
+    scoring_model_name: str,
+    evidence_model_name: str,
+    review_model_name: str,
+    snapshot: dict[str, Any],
+    turns: list[_TranscriptTurn],
+    rubric: list[_RubricItem],
+) -> _FinalEvalPayload:
+    from agents import Agent, OpenAIChatCompletionsModel, set_tracing_disabled
+
+    set_tracing_disabled(True)
+    scoring_model = OpenAIChatCompletionsModel(model=scoring_model_name, openai_client=client)
+    evidence_model = OpenAIChatCompletionsModel(model=evidence_model_name, openai_client=client)
+    review_model = OpenAIChatCompletionsModel(model=review_model_name, openai_client=client)
+
+    shared_context = (
+        "### Scenario\n"
+        f"{_scenario_block(snapshot)}\n\n"
+        "### Transcript\n"
+        f"{_transcript_block(turns)}\n\n"
+        "### Learner quote bank\n"
+        f"{_quote_bank(turns)}\n\n"
+        "### Rubric\n"
+        f"{_rubric_block(rubric)}"
+    )
+
+    scoring_agent = Agent(
+        name="Rubric scoring evaluator",
+        model=scoring_model,
+        output_type=_ScoreDraftPayload,
+        instructions=(
+            "You score completed Squinia workplace simulations. Grade only what is evidenced in the transcript. "
+            "Use every rubric id exactly once. Scores must be integers within each rubric max_score. "
+            "Write concise, customer-facing summaries."
+        ),
+    )
+    evidence_agent = Agent(
+        name="Evidence and improvement evaluator",
+        model=evidence_model,
+        output_type=_EvidencePayload,
+        instructions=(
+            "You identify exact learner evidence and specific coaching improvements. For each rubric id, choose "
+            "one example_quote copied verbatim from the learner quote bank only. Do not quote the agent. "
+            "The improvement should tell the learner what to do or what better wording could sound like next time."
+        ),
+    )
+    reviewer_agent = Agent(
+        name="Evaluation quality reviewer",
+        model=review_model,
+        output_type=_FinalEvalPayload,
+        instructions=(
+            "You are the final quality-control evaluator. Merge the scoring draft and evidence draft. "
+            "Reject invented evidence. Every example_quote must be copied exactly from a USER turn in the quote bank. "
+            "Every rubric id must match the rubric. Keep feedback direct, fair, and useful for a learner trying to improve."
+        ),
+    )
+
+    scoring = await _run_agent(scoring_agent, shared_context)
+    evidence = await _run_agent(evidence_agent, shared_context)
+    review_input = (
+        f"{shared_context}\n\n"
+        "### Scoring draft\n"
+        f"{scoring.model_dump_json()}\n\n"
+        "### Evidence draft\n"
+        f"{evidence.model_dump_json()}"
+    )
+    return await _run_agent(reviewer_agent, review_input)
+
+
+def _validated_quote(item: _FinalScoreItem, turns: list[_TranscriptTurn]) -> str:
+    learner_turns = [t for t in turns if t.role == "USER"]
+    quote = _clean_text(item.example_quote).strip('"')
+    if quote:
+        quote_norm = _normalized(quote)
+        if any(quote_norm and quote_norm in _normalized(t.text) for t in learner_turns):
+            return quote
+
+    if item.quote_turn_id:
+        chosen = next((t for t in learner_turns if t.id == item.quote_turn_id), None)
+        if chosen:
+            return chosen.text[:1200]
+
+    return learner_turns[0].text[:1200] if learner_turns else ""
+
+
+def _scores_to_complete_items(
+    payload: _FinalEvalPayload,
+    rubric: list[_RubricItem],
+    turns: list[_TranscriptTurn],
+) -> list[EvalScoreCompleteItem]:
+    max_by_id = {item.id: item.max_score for item in rubric}
+    by_id = {item.rubric_item_id: item for item in payload.scores}
+    out: list[EvalScoreCompleteItem] = []
+    for rubric_item in rubric:
+        item = by_id.get(rubric_item.id)
+        if not item:
+            continue
+        try:
+            rid = UUID(str(item.rubric_item_id))
+        except ValueError:
+            continue
+        cap = max_by_id.get(str(rid), rubric_item.max_score)
+        score = min(max(0, int(item.score)), cap)
+        summary = _clean_text(item.summary)[:4000]
+        rationale = _clean_text(item.rationale or item.summary)[:4000]
+        improvement = _clean_text(item.improvement)[:4000]
+        quote = _validated_quote(item, turns)[:4000]
+        out.append(
+            EvalScoreCompleteItem(
+                rubric_item_id=rid,
+                score=score,
+                rationale=rationale,
+                summary=summary,
+                example_quote=quote or None,
+                improvement=improvement or None,
+            )
+        )
+    return out
+
+
+async def _mark_failed(session_id: UUID, message: str) -> None:
+    async with db_manager.session_factory() as db:
+        sessions = SessionRepository(db)
+        evaluations = EvaluationRepository(db)
+        row = await sessions.get_by_id(session_id)
+        if not row:
+            return
+        ev = await evaluations.get_by_session(session_id, row.tenant_id)
+        if ev:
+            await evaluations.update(
+                ev.id,
+                row.tenant_id,
+                {
+                    "status": EvalStatus.FAILED,
+                    "feedback_summary": message[:2000],
+                    "completed_at": datetime.now(timezone.utc),
+                },
+            )
+            await db.commit()
 
 
 async def run_openai_evaluation_job(session_id: UUID) -> None:
@@ -75,13 +369,14 @@ async def run_openai_evaluation_job(session_id: UUID) -> None:
         if ev.status not in (EvalStatus.PENDING, EvalStatus.PROCESSING):
             return
 
-        if not settings.OPENAI_API_KEY:
+        api_key = settings.OPENROUTER_API_KEY or settings.OPENAI_API_KEY
+        if not api_key:
             await evaluations.update(
                 ev.id,
                 tenant_id,
                 {
                     "status": EvalStatus.FAILED,
-                    "feedback_summary": "OPENAI_API_KEY is not configured; evaluation was not run.",
+                    "feedback_summary": "OPENROUTER_API_KEY is not configured; evaluation was not run.",
                     "completed_at": datetime.now(timezone.utc),
                 },
             )
@@ -101,109 +396,55 @@ async def run_openai_evaluation_job(session_id: UUID) -> None:
     try:
         from openai import AsyncOpenAI
     except ImportError as e:  # pragma: no cover
+        await _mark_failed(session_id, f"OpenAI SDK missing: {e}")
+        return
+
+    try:
         async with db_manager.session_factory() as db:
             sessions = SessionRepository(db)
-            evaluations = EvaluationRepository(db)
+            messages = MessageRepository(db)
             row = await sessions.get_by_id(session_id)
             if not row:
                 return
-            ev2 = await evaluations.get_by_session(session_id, row.tenant_id)
-            if ev2:
-                await evaluations.update(
-                    ev2.id,
-                    row.tenant_id,
-                    {
-                        "status": EvalStatus.FAILED,
-                        "feedback_summary": f"OpenAI SDK missing: {e}",
-                        "completed_at": datetime.now(timezone.utc),
-                    },
-                )
-                await db.commit()
-        return
+            tenant_id = row.tenant_id
+            snap = row.scenario_snapshot if isinstance(row.scenario_snapshot, dict) else {}
+            msgs = await messages.list_for_session(session_id)
+            turns = _transcript_turns_from_messages(msgs)
+            rubric = _rubric_items(snap)
 
-    client = AsyncOpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=settings.OPENROUTER_API_KEY,
-    )
-    model = settings.OPENAI_CHAT_MODEL or "gpt-4o-mini"
-
-    async with db_manager.session_factory() as db:
-        sessions = SessionRepository(db)
-        messages = MessageRepository(db)
-        row = await sessions.get_by_id(session_id)
-        if not row:
-            return
-        tenant_id = row.tenant_id
-        snap = row.scenario_snapshot if isinstance(row.scenario_snapshot, dict) else {}
-        msgs = await messages.list_for_session(session_id)
-        transcript = _transcript_from_messages(msgs)
-        rubric_txt = _rubric_block(snap)
-
-    system = (
-        "You are an expert evaluator for workplace simulations. "
-        "Read the transcript and rubric. Respond with JSON only (no markdown) matching this shape:\n"
-        '{"overall_score":0-100,"feedback_summary":"string","strengths":"string|null",'
-        '"improvements":"string|null","scores":[{"rubric_item_id":"uuid","score":int,"rationale":"string|null"}]}\n'
-        "Each rubric_item_id must match an id from the rubric list. Scores must be integers between 0 and max_score for that row."
-    )
-    user = f"### Transcript\n{transcript}\n\n### Rubric\n{rubric_txt}"
-
-    try:
-        resp = await client.chat.completions.create(
-            model=model,
-            response_format={"type": "json_object"},
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            temperature=0.3,
+        client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=settings.OPENROUTER_API_KEY or settings.OPENAI_API_KEY)
+        default_model = settings.OPENAI_CHAT_MODEL or "gpt-4o-mini"
+        payload = await _agentic_evaluate(
+            client=client,
+            scoring_model_name=settings.OPENAI_EVALUATION_SCORING_MODEL or default_model,
+            evidence_model_name=settings.OPENAI_EVALUATION_EVIDENCE_MODEL or default_model,
+            review_model_name=settings.OPENAI_EVALUATION_REVIEW_MODEL or default_model,
+            snapshot=snap,
+            turns=turns,
+            rubric=rubric,
         )
-        raw = (resp.choices[0].message.content or "").strip()
-        payload = _LLMEvalPayload.model_validate(json.loads(raw))
-    except Exception as e:
-        logger.exception("evaluation_runner: OpenAI failed", session_id=str(session_id))
-        async with db_manager.session_factory() as db:
-            evaluations = EvaluationRepository(db)
-            ev2 = await evaluations.get_by_session(session_id, tenant_id)
-            if ev2:
-                await evaluations.update(
-                    ev2.id,
-                    tenant_id,
-                    {
-                        "status": EvalStatus.FAILED,
-                        "feedback_summary": f"Evaluation failed: {e!s}"[:2000],
-                        "completed_at": datetime.now(timezone.utc),
-                    },
-                )
-                await db.commit()
+    except ImportError as e:
+        logger.exception("evaluation_runner: Agents SDK missing", session_id=str(session_id))
+        await _mark_failed(session_id, f"OpenAI Agents SDK missing: {e}")
         return
-
-    rubric_items = snap.get("rubric") if isinstance(snap.get("rubric"), list) else []
-    max_by_id: dict[str, int] = {}
-    for item in rubric_items:
-        if isinstance(item, dict) and item.get("id"):
-            try:
-                max_by_id[str(item["id"])] = int(item.get("max_score") or 5)
-            except (TypeError, ValueError):
-                max_by_id[str(item["id"])] = 5
-
-    scores_out: list[EvalScoreCompleteItem] = []
-    for s in payload.scores:
-        try:
-            rid = UUID(str(s.rubric_item_id))
-        except ValueError:
-            continue
-        cap = max_by_id.get(str(rid), 100)
-        sc = min(max(0, int(s.score)), cap)
-        scores_out.append(EvalScoreCompleteItem(rubric_item_id=rid, score=sc, rationale=s.rationale))
+    except Exception as e:
+        logger.exception("evaluation_runner: agentic evaluation failed", session_id=str(session_id))
+        await _mark_failed(session_id, f"Evaluation failed: {e!s}")
+        return
 
     body = InternalEvalCompleteRequest(
         overall_score=min(100, max(0, payload.overall_score)),
-        feedback_summary=payload.feedback_summary[:8000],
-        strengths=(payload.strengths or None),
-        improvements=(payload.improvements or None),
-        highlights=[],
-        scores=scores_out,
+        feedback_summary=_clean_text(payload.feedback_summary)[:8000],
+        strengths=(_clean_text(payload.strengths) or None) if payload.strengths else None,
+        improvements=(_clean_text(payload.improvements) or None) if payload.improvements else None,
+        highlights=[
+            {
+                "kind": "agentic_evaluation_review",
+                "note": _clean_text(payload.reviewer_notes)[:2000],
+                "transcript_turns": len(turns),
+            }
+        ],
+        scores=_scores_to_complete_items(payload, rubric, turns),
     )
 
     try:
@@ -215,21 +456,4 @@ async def run_openai_evaluation_job(session_id: UUID) -> None:
             await svc.internal_complete(ev3.id, body)
     except Exception as e:
         logger.exception("evaluation_runner: persist failed", session_id=str(session_id))
-        async with db_manager.session_factory() as db:
-            evaluations = EvaluationRepository(db)
-            sessions = SessionRepository(db)
-            row = await sessions.get_by_id(session_id)
-            if not row:
-                return
-            ev4 = await evaluations.get_by_session(session_id, row.tenant_id)
-            if ev4:
-                await evaluations.update(
-                    ev4.id,
-                    row.tenant_id,
-                    {
-                        "status": EvalStatus.FAILED,
-                        "feedback_summary": f"Could not persist evaluation: {e!s}"[:2000],
-                        "completed_at": datetime.now(timezone.utc),
-                    },
-                )
-                await db.commit()
+        await _mark_failed(session_id, f"Could not persist evaluation: {e!s}")

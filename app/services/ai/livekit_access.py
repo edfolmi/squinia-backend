@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 from uuid import UUID
 
 from app.core.config import settings
@@ -132,7 +133,12 @@ def issue_livekit_participant_token(*, session_id: UUID, user_id: UUID, display_
     return settings.LIVEKIT_URL.strip(), room, token
 
 
-async def dispatch_livekit_agent(session_id: UUID, participant_identity: str) -> None:
+async def dispatch_livekit_agent(
+    session_id: UUID,
+    participant_identity: str,
+    *,
+    scenario_metadata: dict[str, Any] | None = None,
+) -> None:
     """
     Dispatches the configured LiveKit agent to the session room.
     """
@@ -157,16 +163,18 @@ async def dispatch_livekit_agent(session_id: UUID, participant_identity: str) ->
                 if getattr(dispatch, "agent_name", None) == agent_name:
                     return
 
+            metadata = {
+                "session_id": str(session_id),
+                "participant_identity": participant_identity,
+            }
+            if scenario_metadata:
+                metadata.update(scenario_metadata)
+
             await api.agent_dispatch.create_dispatch(
                 lk_api.CreateAgentDispatchRequest(
                     room=room,
                     agent_name=agent_name,
-                    metadata=json.dumps(
-                        {
-                            "session_id": str(session_id),
-                            "participant_identity": participant_identity,
-                        }
-                    ),
+                    metadata=json.dumps(metadata),
                 ),
             )
     except Exception as e:

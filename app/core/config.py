@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Application
     APP_NAME: str = "FastAPI Backend"
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
-    DEBUG: bool = True
+    DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
     
     # Security
@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: RedisDsn
     REDIS_CACHE_TTL: int = 300
+    REDIS_CONNECT_TIMEOUT_SECONDS: float = 2.0
     
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60
@@ -68,6 +69,9 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
+    OPENAI_EVALUATION_SCORING_MODEL: str = ""
+    OPENAI_EVALUATION_EVIDENCE_MODEL: str = ""
+    OPENAI_EVALUATION_REVIEW_MODEL: str = ""
     DEEPGRAM_API_KEY: str = ""
     CARTESIA_API_KEY: str = ""
     GROQ_API_KEY: str = ""
@@ -81,6 +85,7 @@ class Settings(BaseSettings):
     LIVEKIT_AGENT_NAME: str = "squinia-voice-agent"
     LIVEKIT_WORKER_AUTOSTART: bool = False
     LIVEKIT_WORKER_MODE: Literal["start", "dev"] = "start"
+    LIVEKIT_WORKER_AUTOSTART_WITH_RELOAD: bool = False
     
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

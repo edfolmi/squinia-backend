@@ -16,13 +16,9 @@ logger = logging.getLogger("app.agents.livekit_voice_agent")
 
 
 class SimulationVoiceAgent(Agent):
-    def __init__(self) -> None:
+    def __init__(self, instructions: str) -> None:
         super().__init__(
-            instructions=(
-                "You are SQuinia's live simulation partner. "
-                "Lead realistic interview and workplace communication practice. "
-                "Speak first when the room opens, stay concise, and keep the simulation natural."
-            ),
+            instructions=instructions,
         )
 
 
@@ -47,8 +43,15 @@ async def entrypoint(ctx: JobContext) -> None:
         vad=silero.VAD.load(),
     )
 
+    scenario_prompt = str(metadata.get("scenario_prompt") or "").strip()
+    instructions = scenario_prompt or (
+        "You are Squinia's live simulation partner. Lead realistic interview and workplace "
+        "communication practice. Speak first when the room opens, stay concise, and keep the "
+        "simulation natural."
+    )
+
     await session.start(
-        agent=SimulationVoiceAgent(),
+        agent=SimulationVoiceAgent(instructions),
         room=ctx.room,
         room_input_options=RoomInputOptions(
             noise_cancellation=noise_cancellation.BVC(),
@@ -56,10 +59,15 @@ async def entrypoint(ctx: JobContext) -> None:
         ),
     )
     logger.info("Voice agent session started for room=%s participant=%s", ctx.room.name, participant_identity)
-    opening = session.say(
-        "Hello, thanks for joining. Let's begin the simulation now.",
-        allow_interruptions=False,
-    )
+    opening_message = str(metadata.get("opening_message") or "").strip()
+    scenario_title = str(metadata.get("scenario_title") or "").strip()
+    if not opening_message:
+        opening_message = (
+            f"Thanks for joining. Let's begin {scenario_title}."
+            if scenario_title
+            else "Thanks for joining. Let's begin the simulation."
+        )
+    opening = session.say(opening_message, allow_interruptions=False)
     await opening
     logger.info("Voice agent opening line played for room=%s", ctx.room.name)
     logger.info("Voice agent joined room=%s", ctx.room.name)

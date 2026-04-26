@@ -43,9 +43,15 @@ def _evaluation_full(ev: Any) -> dict:
         criterion = ri.criterion if ri else "unknown"
         max_score = ri.max_score if ri else 0
         scores.append(
-            EvaluationScorePublic(criterion=criterion, score=s.score, max_score=max_score, rationale=s.rationale).model_dump(
-                mode="json",
-            ),
+            EvaluationScorePublic(
+                criterion=criterion,
+                score=s.score,
+                max_score=max_score,
+                rationale=s.rationale,
+                summary=s.summary,
+                example_quote=s.example_quote,
+                improvement=s.improvement,
+            ).model_dump(mode="json"),
         )
     base = EvaluationResponse.model_validate(ev).model_dump(mode="json")
     return EvaluationFullResponse(**{**base, "scores": scores}).model_dump(mode="json")

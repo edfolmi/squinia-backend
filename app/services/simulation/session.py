@@ -15,6 +15,7 @@ from app.models.simulation.scenario import ScenarioStatus
 from app.models.simulation.simulation_session import SessionMode, SessionStatus, SimulationSession
 from app.repositories.simulation import CohortRepository, EvaluationRepository, MessageRepository, ScenarioRepository, SessionRepository
 from app.services.ai.livekit_access import close_livekit_room, dispatch_livekit_agent
+from app.services.ai.scenario_prompt import compact_scenario_metadata
 from app.services.ai.text_simulation_chat import complete_text_chat_turn, complete_text_opening_turn
 from app.schemas.simulation.requests import SimulationSessionStartRequest, SimulationSessionTranscriptIngestRequest
 
@@ -237,7 +238,12 @@ class SessionService:
         from app.services.ai.livekit_access import ensure_livekit_room
 
         await ensure_livekit_room(session_id)
-        await dispatch_livekit_agent(session_id, str(user_id))
+        snapshot = row.scenario_snapshot if isinstance(row.scenario_snapshot, dict) else {}
+        await dispatch_livekit_agent(
+            session_id,
+            str(user_id),
+            scenario_metadata=compact_scenario_metadata(snapshot),
+        )
         from app.services.ai.livekit_access import issue_livekit_participant_token
 
         server_url, room_name, participant_token = issue_livekit_participant_token(
