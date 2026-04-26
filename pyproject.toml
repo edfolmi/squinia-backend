@@ -24,4 +24,9 @@ dependencies = [
     "uvicorn[standard]>=0.44.0",
     "openai>=1.66.0",
     "livekit-api>=0.8.0",
+    "livekit-agents[cartesia,deepgram,openai,silero]>=1.2.15",
+    "livekit-plugins-noise-cancellation~=0.2",
+    "python-dotenv>=1.1.1",
+    "pip>=26.0.1",
+    "livekit-plugins-groq>=1.5.6",
 ]

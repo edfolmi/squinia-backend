@@ -68,12 +68,19 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
+    DEEPGRAM_API_KEY: str = ""
+    CARTESIA_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
+    GOOGLE_API_KEY: str = ""
+    SILERO_API_KEY: str = ""
 
     # LiveKit Cloud — participant tokens for phone/video (worker: integration/voice_agent_workshop)
     LIVEKIT_URL: str = ""
     LIVEKIT_API_KEY: str = ""
     LIVEKIT_API_SECRET: str = ""
     LIVEKIT_AGENT_NAME: str = "squinia-voice-agent"
+    LIVEKIT_WORKER_AUTOSTART: bool = False
+    LIVEKIT_WORKER_MODE: Literal["start", "dev"] = "start"
     
     @field_validator("DATABASE_URL", mode="before")
     @classmethod

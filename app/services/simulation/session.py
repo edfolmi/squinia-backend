@@ -89,8 +89,6 @@ class SessionService:
                 "started_at": now,
             },
         )
-        if body.mode in (SessionMode.VOICE, SessionMode.VIDEO):
-            await dispatch_livekit_agent(session.id)
         await self.db.commit()
         logger.info("Session started", session_id=str(session.id), user_id=str(user_id))
         return {
@@ -236,6 +234,10 @@ class SessionService:
                 code="SESSION_MODE_NOT_LIVEKIT",
                 message="LiveKit tokens are only issued for VOICE or VIDEO sessions.",
             )
+        from app.services.ai.livekit_access import ensure_livekit_room
+
+        await ensure_livekit_room(session_id)
+        await dispatch_livekit_agent(session_id, str(user_id))
         from app.services.ai.livekit_access import issue_livekit_participant_token
 
         server_url, room_name, participant_token = issue_livekit_participant_token(

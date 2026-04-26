@@ -1,10 +1,15 @@
 """LiveKit token, dispatch, and room lifecycle helpers."""
 from __future__ import annotations
 
+import asyncio
+import json
 from uuid import UUID
 
 from app.core.config import settings
 from app.core.exceptions import AppError
+
+_LIVEKIT_AGENT_NAME_ATTRIBUTE = "lk.agent.name"
+_dispatch_locks: dict[str, asyncio.Lock] = {}
 
 
 def livekit_room_name_for_session(session_id: UUID) -> str:
@@ -44,6 +49,62 @@ def _livekit_api():
     return lk_api
 
 
+def _dispatch_lock_for_room(room: str) -> asyncio.Lock:
+    lock = _dispatch_locks.get(room)
+    if lock is None:
+        lock = asyncio.Lock()
+        _dispatch_locks[room] = lock
+    return lock
+
+
+async def _room_has_agent_participant(api, lk_api, room: str, agent_name: str) -> bool:
+    participants = await api.room.list_participants(lk_api.ListParticipantsRequest(room=room))
+    for participant in getattr(participants, "participants", []) or []:
+        attrs = getattr(participant, "attributes", None) or {}
+        if attrs.get(_LIVEKIT_AGENT_NAME_ATTRIBUTE) == agent_name:
+            return True
+    return False
+
+
+async def ensure_livekit_room(session_id: UUID) -> str:
+    """
+    Ensures the LiveKit room exists before participants or agents try to join it.
+    """
+    _require_livekit_base_config()
+    lk_api = _livekit_api()
+    room = livekit_room_name_for_session(session_id)
+    api = lk_api.LiveKitAPI(
+        url=settings.LIVEKIT_URL.strip(),
+        api_key=settings.LIVEKIT_API_KEY,
+        api_secret=settings.LIVEKIT_API_SECRET,
+    )
+    try:
+        existing = await api.room.list_rooms(lk_api.ListRoomsRequest(names=[room]))
+        if getattr(existing, "rooms", None):
+            return room
+        await api.room.create_room(
+            lk_api.CreateRoomRequest(
+                name=room,
+                empty_timeout=60 * 10,
+                departure_timeout=60,
+                max_participants=4,
+                metadata=json.dumps({"session_id": str(session_id)}),
+            )
+        )
+        return room
+    except Exception as e:
+        msg = str(e).lower()
+        if "already exists" in msg or "alreadyexists" in msg:
+            return room
+        raise AppError(
+            status_code=502,
+            code="LIVEKIT_ROOM_CREATE_FAILED",
+            message=f"Could not prepare LiveKit room '{room}': {e}",
+        ) from None
+    finally:
+        await api.aclose()
+
+
 def issue_livekit_participant_token(*, session_id: UUID, user_id: UUID, display_name: str) -> tuple[str, str, str]:
     """
     Returns (server_url, room_name, participant_jwt).
@@ -71,28 +132,43 @@ def issue_livekit_participant_token(*, session_id: UUID, user_id: UUID, display_
     return settings.LIVEKIT_URL.strip(), room, token
 
 
-async def dispatch_livekit_agent(session_id: UUID) -> None:
+async def dispatch_livekit_agent(session_id: UUID, participant_identity: str) -> None:
     """
     Dispatches the configured LiveKit agent to the session room.
     """
     _require_livekit_base_config()
     agent_name = _require_livekit_agent_name()
     lk_api = _livekit_api()
-    room = livekit_room_name_for_session(session_id)
+    room = await ensure_livekit_room(session_id)
 
     api = lk_api.LiveKitAPI(
         url=settings.LIVEKIT_URL.strip(),
         api_key=settings.LIVEKIT_API_KEY,
         api_secret=settings.LIVEKIT_API_SECRET,
     )
+    lock = _dispatch_lock_for_room(room)
     try:
-        await api.agent_dispatch.create_dispatch(
-            lk_api.CreateAgentDispatchRequest(
-                room=room,
-                agent_name=agent_name,
-                metadata=f'{{"session_id":"{session_id}"}}',
-            ),
-        )
+        async with lock:
+            if await _room_has_agent_participant(api, lk_api, room, agent_name):
+                return
+
+            existing = await api.agent_dispatch.list_dispatch(room_name=room)
+            for dispatch in existing:
+                if getattr(dispatch, "agent_name", None) == agent_name:
+                    return
+
+            await api.agent_dispatch.create_dispatch(
+                lk_api.CreateAgentDispatchRequest(
+                    room=room,
+                    agent_name=agent_name,
+                    metadata=json.dumps(
+                        {
+                            "session_id": str(session_id),
+                            "participant_identity": participant_identity,
+                        }
+                    ),
+                ),
+            )
     except Exception as e:
         msg = str(e).lower()
         if "already" in msg and "dispatch" in msg:

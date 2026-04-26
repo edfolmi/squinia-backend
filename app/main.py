@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.exceptions import AppError
 from app.core.logging import configure_logging, get_logger
 from app.db.session import db_manager
+from app.services.ai.livekit_worker_manager import livekit_worker_manager
 from app.utils.cache import cache_manager
 from app.api.v1.router import api_router
 from app.middleware.rate_limit import limiter, rate_limit_exceeded_handler
@@ -36,10 +37,12 @@ async def lifespan(app: FastAPI):
     logger.info("Database engine initialized")
     await cache_manager.connect()
     logger.info("Redis cache connected")
+    livekit_worker_manager.start()
 
     yield
 
     logger.info("Shutting down application")
+    livekit_worker_manager.stop()
     await db_manager.close_engine()
     logger.info("Database connections closed")
     await cache_manager.close()
@@ -125,9 +128,17 @@ async def root():
 
 @app.get("/health", tags=["Health"])
 async def health_check():
+    worker = livekit_worker_manager.status()
     return ok({
         "status": "healthy",
         "environment": settings.ENVIRONMENT,
+        "livekit_worker": {
+            "enabled": worker.enabled,
+            "configured": worker.configured,
+            "running": worker.running,
+            "pid": worker.pid,
+            "exit_code": worker.exit_code,
+        },
     })
 
 
