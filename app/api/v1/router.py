@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from fastapi.routing import APIRoute
 
 from app.api.v1.endpoints.analytics import router as analytics_router
+from app.api.v1.endpoints.agent_personas import router as agent_personas_router
 from app.api.v1.endpoints.assignments import router as assignments_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.cohorts import router as cohorts_router
@@ -23,6 +24,7 @@ api_router = APIRouter()
 
 api_router.include_router(auth_router)
 api_router.include_router(cohorts_router)
+api_router.include_router(agent_personas_router)
 api_router.include_router(scenarios_router)
 api_router.include_router(sessions_router)
 api_router.include_router(evaluations_router)

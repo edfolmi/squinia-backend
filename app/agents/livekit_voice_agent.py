@@ -6,13 +6,130 @@ import logging
 import os
 
 from dotenv import load_dotenv
-from livekit.agents import Agent, AgentSession, JobContext, RoomInputOptions, WorkerOptions, cli
-from livekit.plugins import deepgram, noise_cancellation, openai, silero, groq
+from livekit.agents import Agent, AgentSession, JobContext, RoomInputOptions, WorkerOptions, cli, stt, llm, tts
+from livekit.plugins import deepgram, noise_cancellation, openai, silero, groq, cartesia
+from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 load_dotenv()
 
 
 logger = logging.getLogger("app.agents.livekit_voice_agent")
+
+DEEPGRAM_VOICES = {
+    "MALE": "aura-orion-en",
+    "FEMALE": "aura-asteria-en",
+    "UNSPECIFIED": "aura-asteria-en",
+}
+
+OPENAI_VOICES = {
+    "MALE": "onyx",
+    "FEMALE": "nova",
+    "UNSPECIFIED": "alloy",
+}
+
+DEFAULT_CARTESIA_VOICE_ID = "79d424b3-f6f3-4299-87a1-5d9c0e25526f"
+
+
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _clean_metadata_value(metadata: dict, key: str) -> str:
+    return str(metadata.get(key) or "").strip()
+
+
+def _persona_gender(metadata: dict) -> str:
+    gender = _clean_metadata_value(metadata, "persona_gender").upper()
+    return gender if gender in {"MALE", "FEMALE"} else "UNSPECIFIED"
+
+
+def _voice_provider(metadata: dict) -> str:
+    provider = _clean_metadata_value(metadata, "voice_provider").lower()
+    return provider if provider in {"deepgram", "cartesia", "openai"} else "deepgram"
+
+
+def _deepgram_voice(metadata: dict) -> str:
+    if _voice_provider(metadata) == "deepgram":
+        voice_id = _clean_metadata_value(metadata, "voice_id")
+        if voice_id:
+            return voice_id
+    return DEEPGRAM_VOICES[_persona_gender(metadata)]
+
+
+def _openai_voice(metadata: dict) -> str:
+    if _voice_provider(metadata) == "openai":
+        voice_id = _clean_metadata_value(metadata, "voice_id")
+        if voice_id:
+            return voice_id
+    gender = _persona_gender(metadata)
+    return os.getenv(f"OPENAI_TTS_VOICE_{gender}", OPENAI_VOICES[gender]).strip() or OPENAI_VOICES[gender]
+
+
+def _cartesia_voice(metadata: dict) -> str | None:
+    if _voice_provider(metadata) == "cartesia":
+        voice_id = _clean_metadata_value(metadata, "voice_id")
+        if voice_id:
+            return voice_id
+    gender = _persona_gender(metadata)
+    env_voice = os.getenv(f"CARTESIA_TTS_VOICE_{gender}_ID", "").strip()
+    if env_voice:
+        return env_voice
+    if gender == "MALE":
+        return None
+    return os.getenv("CARTESIA_TTS_VOICE_DEFAULT_ID", DEFAULT_CARTESIA_VOICE_ID).strip() or DEFAULT_CARTESIA_VOICE_ID
+
+
+def _tts_voice_specs(metadata: dict) -> list[tuple[str, str]]:
+    preferred = _voice_provider(metadata)
+    providers = [preferred] + [p for p in ("deepgram", "cartesia", "openai") if p != preferred]
+    specs: list[tuple[str, str]] = []
+    for provider in providers:
+        if provider == "deepgram":
+            specs.append(("deepgram", _deepgram_voice(metadata)))
+        elif provider == "cartesia":
+            voice = _cartesia_voice(metadata)
+            if voice:
+                specs.append(("cartesia", voice))
+        elif provider == "openai":
+            specs.append(("openai", _openai_voice(metadata)))
+    return specs
+
+
+def _tts_adapters_from_metadata(metadata: dict) -> list[tts.TTS]:
+    adapters: list[tts.TTS] = []
+    for provider, voice in _tts_voice_specs(metadata):
+        if provider == "deepgram":
+            adapters.append(deepgram.TTS(model=voice))
+        elif provider == "cartesia":
+            adapters.append(cartesia.TTS(model="sonic-3", voice=voice))
+        elif provider == "openai":
+            adapters.append(openai.TTS(model="gpt-4o-mini-tts", voice=voice))
+    return adapters
+
+
+def _turn_detection_model() -> object | None:
+    if not _env_flag("LIVEKIT_TURN_DETECTION_ENABLED"):
+        return None
+    try:
+        return MultilingualModel()
+    except Exception:
+        logger.warning(
+            "LiveKit turn detection disabled because model assets are unavailable",
+            exc_info=True,
+        )
+        return None
+
+
+def _worker_port() -> int:
+    raw = os.getenv("LIVEKIT_WORKER_PORT", "0").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("Invalid LIVEKIT_WORKER_PORT value %r; using ephemeral port", raw)
+        return 0
 
 
 class SimulationVoiceAgent(Agent):
@@ -33,14 +150,29 @@ async def entrypoint(ctx: JobContext) -> None:
     participant_identity = str(metadata.get("participant_identity") or "").strip() or None
     if participant_identity:
         await ctx.wait_for_participant(identity=participant_identity)
-
+    
+    vad = silero.VAD.load()
     session = AgentSession(
-        stt=deepgram.STT(model="nova-3"),
+        stt=stt.FallbackAdapter(
+            [
+                deepgram.STT(model="nova-3"),
+                stt.StreamAdapter(stt=openai.STT(model="gpt-4o-transcribe"), vad=vad)
+            ]
+        ),
         # llm=openai.LLM(model="gpt-4.1-mini"),
-        llm=groq.LLM(model="llama-3.3-70b-versatile"),
+        llm=llm.FallbackAdapter(
+            [
+                groq.LLM(model="llama-3.3-70b-versatile"),
+                openai.LLM(model="gpt-4o-mini")
+            ]
+        ),
         # tts=openai.TTS(model="gpt-4o-mini-tts", voice="alloy"),
-        tts=deepgram.TTS(model="aura-asteria-en"),
-        vad=silero.VAD.load(),
+        tts=tts.FallbackAdapter(
+            _tts_adapters_from_metadata(metadata)
+        ),
+        vad=vad,
+        turn_detection=_turn_detection_model(),
+        preemptive_generation=True,
     )
 
     scenario_prompt = str(metadata.get("scenario_prompt") or "").strip()
@@ -81,6 +213,7 @@ def main() -> None:
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             agent_name=agent_name,
+            port=_worker_port(),
         )
     )
 

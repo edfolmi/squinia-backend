@@ -30,6 +30,7 @@ class CohortMembersAddRequest(BaseModel):
 class ScenarioCreateRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    persona_id: Optional[UUID] = None
     agent_role: AgentRole
     difficulty: ScenarioDifficulty = ScenarioDifficulty.INTERMEDIATE
     status: ScenarioStatus = ScenarioStatus.DRAFT

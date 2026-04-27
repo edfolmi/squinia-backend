@@ -43,8 +43,24 @@ class SessionService:
             }
             for i in sorted(scenario.rubric_items, key=lambda x: (x.sort_order, str(x.id)))
         ]
+        persona = None
+        if getattr(scenario, "persona", None) is not None:
+            persona = {
+                "id": str(scenario.persona.id),
+                "name": scenario.persona.name,
+                "title": scenario.persona.title,
+                "gender": scenario.persona.gender.value,
+                "avatar_url": scenario.persona.avatar_url,
+                "voice_provider": scenario.persona.voice_provider,
+                "voice_id": scenario.persona.voice_id,
+                "personality": scenario.persona.personality,
+                "communication_style": scenario.persona.communication_style,
+                "background": scenario.persona.background,
+            }
         return {
             "scenario_id": str(scenario.id),
+            "persona_id": str(scenario.persona_id) if scenario.persona_id else None,
+            "persona": persona,
             "title": scenario.title,
             "description": scenario.description,
             "agent_role": scenario.agent_role.value,

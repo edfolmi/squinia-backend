@@ -36,7 +36,7 @@ class ScenarioRepository:
     async def get_with_rubric(self, scenario_id: UUID, tenant_id: UUID) -> Optional[Scenario]:
         stmt = (
             select(Scenario)
-            .options(selectinload(Scenario.rubric_items))
+            .options(selectinload(Scenario.rubric_items), selectinload(Scenario.persona))
             .where(
                 Scenario.id == scenario_id,
                 Scenario.tenant_id == tenant_id,
@@ -57,7 +57,11 @@ class ScenarioRepository:
         difficulty: Optional[ScenarioDifficulty] = None,
         published_only: bool = False,
     ) -> list[Scenario]:
-        stmt = select(Scenario).where(Scenario.tenant_id == tenant_id, Scenario.deleted_at.is_(None))
+        stmt = (
+            select(Scenario)
+            .options(selectinload(Scenario.persona))
+            .where(Scenario.tenant_id == tenant_id, Scenario.deleted_at.is_(None))
+        )
         if status is not None:
             stmt = stmt.where(Scenario.status == status)
         if agent_role is not None:
@@ -96,14 +100,27 @@ class ScenarioRepository:
 
     async def update(self, scenario_id: UUID, tenant_id: UUID, data: dict[str, Any]) -> Optional[Scenario]:
         if not data:
-            return await self.get(scenario_id, tenant_id)
+            return await self.get_with_persona(scenario_id, tenant_id)
         await self.db.execute(
             update(Scenario)
             .where(Scenario.id == scenario_id, Scenario.tenant_id == tenant_id, Scenario.deleted_at.is_(None))
             .values(**data),
         )
         await self.db.flush()
-        return await self.get(scenario_id, tenant_id)
+        return await self.get_with_persona(scenario_id, tenant_id)
+
+    async def get_with_persona(self, scenario_id: UUID, tenant_id: UUID) -> Optional[Scenario]:
+        stmt = (
+            select(Scenario)
+            .options(selectinload(Scenario.persona))
+            .where(
+                Scenario.id == scenario_id,
+                Scenario.tenant_id == tenant_id,
+                Scenario.deleted_at.is_(None),
+            )
+        )
+        r = await self.db.execute(stmt)
+        return r.scalar_one_or_none()
 
     async def soft_delete(self, scenario_id: UUID, tenant_id: UUID) -> None:
         await self.db.execute(

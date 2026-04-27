@@ -18,6 +18,7 @@ from app.db.base import BaseModel
 if TYPE_CHECKING:
     from app.models.auth.tenant import Tenant
     from app.models.auth.user import User
+    from app.models.simulation.agent_persona import AgentPersona
     from app.models.simulation.scenario_rubric_item import ScenarioRubricItem
     from app.models.simulation.simulation_session import SimulationSession
 
@@ -85,6 +86,12 @@ class Scenario(BaseModel):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
+    persona_id: Mapped[Optional[UUID]] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_personas.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     agent_role: Mapped[AgentRole] = mapped_column(
@@ -114,6 +121,7 @@ class Scenario(BaseModel):
 
     tenant: Mapped["Tenant"] = relationship("Tenant")
     author: Mapped["User"] = relationship("User")
+    persona: Mapped[Optional["AgentPersona"]] = relationship("AgentPersona", back_populates="scenarios")
     rubric_items: Mapped[list["ScenarioRubricItem"]] = relationship(
         "ScenarioRubricItem",
         back_populates="scenario",

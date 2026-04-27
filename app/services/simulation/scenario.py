@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.models.simulation.scenario import ScenarioStatus
-from app.repositories.simulation import ScenarioRepository
+from app.repositories.simulation import AgentPersonaRepository, ScenarioRepository
 from app.schemas.simulation.requests import ScenarioCreateRequest
 from app.schemas.simulation.scenario import ScenarioUpdate
 from app.schemas.simulation.scenario_rubric_item import RubricItemBase, RubricItemUpdate
@@ -21,12 +21,22 @@ class ScenarioService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.scenarios = ScenarioRepository(db)
+        self.personas = AgentPersonaRepository(db)
+
+    async def _validate_persona(self, tenant_id: UUID, persona_id: UUID | None) -> None:
+        if persona_id is None:
+            return
+        persona = await self.personas.get(persona_id, tenant_id)
+        if not persona:
+            raise AppError(status_code=400, code="INVALID_PERSONA", message="Persona does not belong to this organization")
 
     async def create(self, tenant_id: UUID, user_id: UUID, body: ScenarioCreateRequest) -> dict:
+        await self._validate_persona(tenant_id, body.persona_id)
         row = await self.scenarios.create(
             {
                 "tenant_id": tenant_id,
                 "created_by": user_id,
+                "persona_id": body.persona_id,
                 "title": body.title,
                 "description": body.description,
                 "agent_role": body.agent_role,
@@ -38,7 +48,8 @@ class ScenarioService:
             },
         )
         await self.db.commit()
-        return {"scenario": row}
+        fresh = await self.scenarios.get_with_persona(row.id, tenant_id)
+        return {"scenario": fresh or row}
 
     async def list_paginated(
         self,
@@ -79,6 +90,8 @@ class ScenarioService:
 
     async def update(self, tenant_id: UUID, scenario_id: UUID, body: ScenarioUpdate) -> dict:
         data = body.model_dump(exclude_unset=True)
+        if "persona_id" in data:
+            await self._validate_persona(tenant_id, data["persona_id"])
         row = await self.scenarios.update(scenario_id, tenant_id, data)
         if not row:
             raise AppError(status_code=404, code="NOT_FOUND", message="Scenario not found")
@@ -106,6 +119,7 @@ class ScenarioService:
         new_data = {
             "tenant_id": tenant_id,
             "created_by": user_id,
+            "persona_id": src.persona_id,
             "title": f"{src.title} (copy)",
             "description": src.description,
             "agent_role": src.agent_role,

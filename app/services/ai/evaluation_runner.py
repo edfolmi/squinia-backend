@@ -189,13 +189,16 @@ def _rubric_block(items: list[_RubricItem]) -> str:
 def _scenario_block(snapshot: dict[str, Any] | None) -> str:
     snap = snapshot or {}
     cfg = snap.get("config") if isinstance(snap.get("config"), dict) else {}
+    persona = snap.get("persona") if isinstance(snap.get("persona"), dict) else {}
     parts = [
         f"Title: {_clean_text(snap.get('title'))}",
         f"Description: {_clean_text(snap.get('description'))}",
         f"Agent role: {_clean_text(snap.get('agent_role'))}",
+        f"Agent persona: {_clean_text(persona.get('name'))} - {_clean_text(persona.get('title'))}",
         f"Learner role: {_clean_text(cfg.get('learner_role'))}",
         f"Scenario notes: {_clean_text(cfg.get('config_notes'))}",
         f"Success criteria: {_clean_text(cfg.get('success_criteria'))}",
+        f"Feedback guidance from the scenario author: {_clean_text(cfg.get('feedback_guidance'))}",
     ]
     return "\n".join(p for p in parts if not p.endswith(": "))
 

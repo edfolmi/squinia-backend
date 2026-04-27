@@ -2,6 +2,7 @@
 
 from app.models.simulation.assignment import Assignment, AssignmentStatus, AssignmentType
 from app.models.simulation.assignment_submission import AssignmentSubmission
+from app.models.simulation.agent_persona import AgentPersona, PersonaGender
 from app.models.simulation.cohort import Cohort, CohortStatus
 from app.models.simulation.cohort_member import CohortMember, CohortMemberRole
 from app.models.simulation.evaluation import Evaluation, EvalStatus
@@ -22,6 +23,7 @@ from app.models.simulation.simulation_session import (
 
 __all__ = [
     "AgentRole",
+    "AgentPersona",
     "Assignment",
     "AssignmentStatus",
     "AssignmentSubmission",
@@ -35,6 +37,7 @@ __all__ = [
     "EvaluationScore",
     "Message",
     "MessageRole",
+    "PersonaGender",
     "Scenario",
     "ScenarioDifficulty",
     "ScenarioRubricItem",

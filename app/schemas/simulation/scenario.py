@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict
 
 from app.models.simulation.scenario import AgentRole, ScenarioDifficulty, ScenarioStatus
+from app.schemas.simulation.agent_persona import AgentPersonaResponse
 
 
 class ScenarioBase(BaseModel):
@@ -15,6 +16,7 @@ class ScenarioBase(BaseModel):
 
     title: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
+    persona_id: Optional[UUID] = None
     agent_role: AgentRole
     difficulty: ScenarioDifficulty = ScenarioDifficulty.INTERMEDIATE
     status: ScenarioStatus = ScenarioStatus.DRAFT
@@ -54,6 +56,7 @@ class ScenarioUpdate(BaseModel):
 
     title: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
+    persona_id: Optional[UUID] = None
     agent_role: Optional[AgentRole] = None
     difficulty: Optional[ScenarioDifficulty] = None
     status: Optional[ScenarioStatus] = None
@@ -71,6 +74,7 @@ class ScenarioResponse(ScenarioBase):
     deleted_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    persona: Optional[AgentPersonaResponse] = None
 
     model_config = ConfigDict(from_attributes=True)
 

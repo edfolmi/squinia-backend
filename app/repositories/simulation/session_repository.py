@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.simulation.evaluation import Evaluation
+from app.models.simulation.evaluation_score import EvaluationScore
 from app.models.simulation.simulation_session import SessionStatus, SimulationSession
 
 
@@ -42,7 +43,9 @@ class SessionRepository:
             select(SimulationSession)
             .options(
                 selectinload(SimulationSession.messages),
-                selectinload(SimulationSession.evaluation).selectinload(Evaluation.scores),
+                selectinload(SimulationSession.evaluation)
+                .selectinload(Evaluation.scores)
+                .selectinload(EvaluationScore.rubric_item),
             )
             .where(SimulationSession.id == session_id, SimulationSession.tenant_id == tenant_id)
         )
