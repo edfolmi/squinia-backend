@@ -67,6 +67,8 @@ class Settings(BaseSettings):
 
     # OpenAI — chat simulations (WebSocket) + evaluation jobs
     OPENROUTER_API_KEY: str = ""
+    OPENROUTER_CHAT_MODEL: str = "openai/gpt-4o-mini"
+    OPENROUTER_GUARD_MODEL: str = "meta-llama/llama-guard-3-8b"
     OPENAI_API_KEY: str = ""
     OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
     OPENAI_EVALUATION_SCORING_MODEL: str = ""
