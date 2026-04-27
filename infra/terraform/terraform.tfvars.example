@@ -1,0 +1,26 @@
+aws_region  = "us-east-1"
+project     = "squinia"
+environment = "prod"
+
+# First bootstrap only:
+# ecs_desired_count = 0
+ecs_desired_count = 1
+
+frontend_origin   = "https://your-vercel-app.vercel.app"
+cors_origins_json = "[\"https://your-vercel-app.vercel.app\"]"
+
+livekit_url               = "wss://your-livekit-project.livekit.cloud"
+livekit_agent_name        = "squinia-voice-agent"
+livekit_worker_autostart  = true
+
+db_name            = "squinia"
+db_master_username = "squinia_admin"
+db_master_password = "replace-with-a-long-random-password"
+
+# Optional but recommended for GitHub Actions OIDC.
+# If your account already has a GitHub OIDC provider, set github_oidc_provider_arn too.
+github_repository = "OWNER/REPO"
+github_branch     = "main"
+
+# Optional HTTPS. Create/validate an ACM cert in this region first.
+# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."

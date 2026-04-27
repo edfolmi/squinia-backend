@@ -12,3 +12,14 @@ wheels/
 .env.local
 
 /integration
+
+# Terraform local state/cache
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!terraform.tfvars.example
+
+DEPLOYMENT_AWS.md
