@@ -50,6 +50,12 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Verify AWS identity and ECR repository
+        shell: bash
+        run: |
+          aws sts get-caller-identity
+          aws ecr describe-repositories --repository-names "$ECR_REPOSITORY"
+
       - name: Set image tags
         id: image
         shell: bash

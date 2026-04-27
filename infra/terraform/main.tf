@@ -396,6 +396,7 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
         Sid    = "EcrPush"
         Effect = "Allow"
         Action = [
+          "ecr:BatchGetImage",
           "ecr:BatchCheckLayerAvailability",
           "ecr:CompleteLayerUpload",
           "ecr:DescribeImages",
