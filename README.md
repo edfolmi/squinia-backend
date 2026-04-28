@@ -2,6 +2,12 @@
 
 Squinia is an AI simulation platform for organisations, bootcamps, and training teams. It lets teams create realistic interview and workplace communication scenarios, invite learners, run chat/phone/video simulations, and generate evidence-based evaluations from the learner's actual transcript.
 
+## Demo Walkthrough
+
+[![Squinia platform walkthrough](docs/squinia-demo-thumbnail.png)](https://www.loom.com/share/70acd7b5b64044af948d4f1b6cf4be90)
+
+Watch the demo walkthrough showing the platform flow and a live simulation practice session.
+
 This repository contains the FastAPI backend.
 
 - Live platform: https://squinia-frontend.vercel.app/
@@ -141,7 +147,7 @@ The backend is designed to run as a containerized FastAPI service on AWS ECS beh
 Useful deployment files:
 
 - `Dockerfile`
-- `DEPLOYMENT_AWS.md`
+- `docs/DEPLOYMENT_AWS.md`
 - `infra/terraform/`
 - `.github/workflows/deploy-backend.yml`
 
