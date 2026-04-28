@@ -8,6 +8,10 @@ Squinia is an AI simulation platform for organisations, bootcamps, and training 
 
 Watch the demo walkthrough showing the platform flow and a live simulation practice session.
 
+## System Design Decisions
+
+**Reviewer note:** after watching the walkthrough, please read [docs/DESIGN-DECISIONS.md](docs/DESIGN-DECISIONS.md). It is a short, skimmable decision log that explains the important system choices, tradeoffs, and "why" behind Squinia, including scenario snapshot fairness, phone/video simulation orchestration, and production infrastructure.
+
 This repository contains the FastAPI backend.
 
 - Live platform: https://squinia-frontend.vercel.app/
