@@ -74,6 +74,8 @@ class Settings(BaseSettings):
     OPENAI_EVALUATION_SCORING_MODEL: str = ""
     OPENAI_EVALUATION_EVIDENCE_MODEL: str = ""
     OPENAI_EVALUATION_REVIEW_MODEL: str = ""
+    OPENAI_TRACING_ENABLED: bool = True
+    OPENAI_TRACING_INCLUDE_SENSITIVE_DATA: bool = False
     DEEPGRAM_API_KEY: str = ""
     CARTESIA_API_KEY: str = ""
     GROQ_API_KEY: str = ""

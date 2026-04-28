@@ -12,6 +12,7 @@ from app.core.exceptions import AppError
 from app.core.logging import get_logger
 from app.models.simulation.message import MessageRole
 from app.repositories.simulation import MessageRepository, SessionRepository
+from app.services.ai.observability import traced_chat_completion
 from app.services.ai.scenario_prompt import system_prompt_from_snapshot
 
 logger = get_logger(__name__)
@@ -54,12 +55,22 @@ def _guard_prompt(user_text: str) -> str:
 
 async def _assert_chat_input_safe(client: Any, *, user_text: str, session_id: UUID) -> None:
     try:
-        completion = await client.chat.completions.create(
-            model=_openrouter_guard_model(),
-            messages=[{"role": "user", "content": _guard_prompt(user_text)}],
-            stream=False,
-            temperature=0,
-            max_tokens=32,
+        guard_model = _openrouter_guard_model()
+        completion = await traced_chat_completion(
+            lambda: client.chat.completions.create(
+                model=guard_model,
+                messages=[{"role": "user", "content": _guard_prompt(user_text)}],
+                stream=False,
+                temperature=0,
+                max_tokens=32,
+            ),
+            workflow="squinia.chat.guard",
+            model=guard_model,
+            provider="openrouter",
+            model_config={"temperature": 0, "max_tokens": 32},
+            logger=logger,
+            session_id=str(session_id),
+            trace_metadata={"surface": "chat", "purpose": "input_guardrail"},
         )
     except Exception:
         logger.exception("OpenRouter guard failed", session_id=str(session_id))
@@ -140,16 +151,23 @@ async def complete_text_opening_turn(
     ]
 
     try:
-        completion = await client.chat.completions.create(
+        completion = await traced_chat_completion(
+            lambda: client.chat.completions.create(
+                model=model,
+                messages=chat_messages,
+                stream=False,
+                temperature=0.7,
+                max_tokens=900,
+            ),
+            workflow="squinia.chat.opening",
             model=model,
-            messages=chat_messages,
-            stream=False,
-            temperature=0.7,
-            max_tokens=900,
+            provider="openrouter",
+            model_config={"temperature": 0.7, "max_tokens": 900},
+            logger=logger,
+            session_id=str(session_id),
+            trace_metadata={"surface": "chat", "purpose": "opening_turn"},
         )
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         logger.exception("OpenAI opening failed", session_id=str(session_id), error=str(e))
         raise AppError(
             status_code=502,
@@ -251,12 +269,21 @@ async def complete_text_chat_turn(
             chat_messages.append({"role": "assistant", "content": m.content})
 
     try:
-        completion = await client.chat.completions.create(
+        completion = await traced_chat_completion(
+            lambda: client.chat.completions.create(
+                model=model,
+                messages=chat_messages,
+                stream=False,
+                temperature=0.7,
+                max_tokens=2000,
+            ),
+            workflow="squinia.chat.response",
             model=model,
-            messages=chat_messages,
-            stream=False,
-            temperature=0.7,
-            max_tokens=2000,
+            provider="openrouter",
+            model_config={"temperature": 0.7, "max_tokens": 2000},
+            logger=logger,
+            session_id=str(session_id),
+            trace_metadata={"surface": "chat", "purpose": "assistant_response"},
         )
     except Exception:
         logger.exception("OpenAI chat failed", session_id=str(session_id))

@@ -14,6 +14,12 @@ from app.db.session import db_manager
 from app.models.simulation.evaluation import EvalStatus
 from app.models.simulation.message import MessageRole
 from app.repositories.simulation import EvaluationRepository, MessageRepository, SessionRepository
+from app.services.ai.observability import (
+    log_model_call,
+    model_call_started_at,
+    openai_trace_config,
+    openai_tracing_enabled,
+)
 from app.schemas.simulation.requests import EvalScoreCompleteItem, InternalEvalCompleteRequest
 from app.services.simulation.evaluation import EvaluationService
 
@@ -203,10 +209,57 @@ def _scenario_block(snapshot: dict[str, Any] | None) -> str:
     return "\n".join(p for p in parts if not p.endswith(": "))
 
 
-async def _run_agent(agent: Any, text: str) -> Any:
-    from agents import Runner
+async def _run_agent(
+    agent: Any,
+    text: str,
+    *,
+    workflow: str,
+    model: str,
+    session_id: UUID,
+    stage: str,
+) -> Any:
+    from agents import RunConfig, Runner
 
-    result = await Runner.run(agent, input=text)
+    started_at = model_call_started_at()
+    run_config = RunConfig(
+        workflow_name=workflow,
+        group_id=str(session_id),
+        tracing=openai_trace_config(),
+        tracing_disabled=not openai_tracing_enabled(),
+        trace_include_sensitive_data=settings.OPENAI_TRACING_INCLUDE_SENSITIVE_DATA,
+        trace_metadata={
+            "surface": "evaluation",
+            "stage": stage,
+            "session_id": str(session_id),
+        },
+    )
+    try:
+        result = await Runner.run(agent, input=text, run_config=run_config)
+    except Exception as exc:
+        log_model_call(
+            logger,
+            workflow=workflow,
+            model=model,
+            provider="openrouter",
+            status="error",
+            started_at=started_at,
+            session_id=str(session_id),
+            error=f"{type(exc).__name__}: {exc}",
+            extra={"stage": stage, "agent": getattr(agent, "name", None)},
+        )
+        raise
+
+    log_model_call(
+        logger,
+        workflow=workflow,
+        model=model,
+        provider="openrouter",
+        status="success",
+        started_at=started_at,
+        session_id=str(session_id),
+        usage_source=getattr(result.context_wrapper, "usage", None),
+        extra={"stage": stage, "agent": getattr(agent, "name", None)},
+    )
     return result.final_output
 
 
@@ -219,10 +272,18 @@ async def _agentic_evaluate(
     snapshot: dict[str, Any],
     turns: list[_TranscriptTurn],
     rubric: list[_RubricItem],
+    session_id: UUID,
 ) -> _FinalEvalPayload:
     from agents import Agent, OpenAIChatCompletionsModel, set_tracing_disabled
 
-    set_tracing_disabled(True)
+    try:
+        from agents.tracing import set_tracing_export_api_key
+    except ImportError:  # pragma: no cover - older SDKs
+        set_tracing_export_api_key = None
+
+    set_tracing_disabled(not openai_tracing_enabled())
+    if openai_tracing_enabled() and set_tracing_export_api_key is not None:
+        set_tracing_export_api_key(settings.OPENAI_API_KEY)
     scoring_model = OpenAIChatCompletionsModel(model=scoring_model_name, openai_client=client)
     evidence_model = OpenAIChatCompletionsModel(model=evidence_model_name, openai_client=client)
     review_model = OpenAIChatCompletionsModel(model=review_model_name, openai_client=client)
@@ -269,8 +330,22 @@ async def _agentic_evaluate(
         ),
     )
 
-    scoring = await _run_agent(scoring_agent, shared_context)
-    evidence = await _run_agent(evidence_agent, shared_context)
+    scoring = await _run_agent(
+        scoring_agent,
+        shared_context,
+        workflow="squinia.evaluation.scoring",
+        model=scoring_model_name,
+        session_id=session_id,
+        stage="scoring",
+    )
+    evidence = await _run_agent(
+        evidence_agent,
+        shared_context,
+        workflow="squinia.evaluation.evidence",
+        model=evidence_model_name,
+        session_id=session_id,
+        stage="evidence",
+    )
     review_input = (
         f"{shared_context}\n\n"
         "### Scoring draft\n"
@@ -278,7 +353,14 @@ async def _agentic_evaluate(
         "### Evidence draft\n"
         f"{evidence.model_dump_json()}"
     )
-    return await _run_agent(reviewer_agent, review_input)
+    return await _run_agent(
+        reviewer_agent,
+        review_input,
+        workflow="squinia.evaluation.review",
+        model=review_model_name,
+        session_id=session_id,
+        stage="review",
+    )
 
 
 def _validated_quote(item: _FinalScoreItem, turns: list[_TranscriptTurn]) -> str:
@@ -355,6 +437,7 @@ async def _mark_failed(session_id: UUID, message: str) -> None:
 
 async def run_openai_evaluation_job(session_id: UUID) -> None:
     """Called after session end; fills evaluation scores or marks FAILED."""
+    logger.info("evaluation_job_status", session_id=str(session_id), status="started")
     async with db_manager.session_factory() as db:
         sessions = SessionRepository(db)
         evaluations = EvaluationRepository(db)
@@ -362,14 +445,23 @@ async def run_openai_evaluation_job(session_id: UUID) -> None:
         row = await sessions.get_by_id(session_id)
         if not row:
             logger.warning("evaluation_runner: session missing", session_id=str(session_id))
+            logger.warning("evaluation_job_status", session_id=str(session_id), status="skipped", reason="session_missing")
             return
 
         tenant_id = row.tenant_id
         ev = await evaluations.get_by_session(session_id, tenant_id)
         if not ev:
             logger.warning("evaluation_runner: no evaluation row", session_id=str(session_id))
+            logger.warning("evaluation_job_status", session_id=str(session_id), status="skipped", reason="evaluation_missing")
             return
         if ev.status not in (EvalStatus.PENDING, EvalStatus.PROCESSING):
+            logger.info(
+                "evaluation_job_status",
+                session_id=str(session_id),
+                status="skipped",
+                reason="already_terminal",
+                evaluation_status=getattr(ev.status, "value", str(ev.status)),
+            )
             return
 
         api_key = settings.OPENROUTER_API_KEY or settings.OPENAI_API_KEY
@@ -384,8 +476,15 @@ async def run_openai_evaluation_job(session_id: UUID) -> None:
                 },
             )
             await db.commit()
+            logger.warning(
+                "evaluation_job_status",
+                session_id=str(session_id),
+                status="failed",
+                reason="model_api_key_missing",
+            )
             return
 
+        logger.info("evaluation_job_status", session_id=str(session_id), status="processing")
         await evaluations.update(
             ev.id,
             tenant_id,
@@ -425,13 +524,26 @@ async def run_openai_evaluation_job(session_id: UUID) -> None:
             snapshot=snap,
             turns=turns,
             rubric=rubric,
+            session_id=session_id,
         )
     except ImportError as e:
         logger.exception("evaluation_runner: Agents SDK missing", session_id=str(session_id))
+        logger.warning(
+            "evaluation_job_status",
+            session_id=str(session_id),
+            status="failed",
+            reason="agents_sdk_missing",
+        )
         await _mark_failed(session_id, f"OpenAI Agents SDK missing: {e}")
         return
     except Exception as e:
         logger.exception("evaluation_runner: agentic evaluation failed", session_id=str(session_id))
+        logger.warning(
+            "evaluation_job_status",
+            session_id=str(session_id),
+            status="failed",
+            reason="agentic_evaluation_failed",
+        )
         await _mark_failed(session_id, f"Evaluation failed: {e!s}")
         return
 
@@ -457,6 +569,19 @@ async def run_openai_evaluation_job(session_id: UUID) -> None:
             if not ev3:
                 return
             await svc.internal_complete(ev3.id, body)
+            logger.info(
+                "evaluation_job_status",
+                session_id=str(session_id),
+                status="completed",
+                overall_score=body.overall_score,
+                score_count=len(body.scores),
+            )
     except Exception as e:
         logger.exception("evaluation_runner: persist failed", session_id=str(session_id))
+        logger.warning(
+            "evaluation_job_status",
+            session_id=str(session_id),
+            status="failed",
+            reason="persist_failed",
+        )
         await _mark_failed(session_id, f"Could not persist evaluation: {e!s}")

@@ -39,6 +39,8 @@ locals {
     OPENROUTER_CHAT_MODEL           = var.openrouter_chat_model
     OPENROUTER_GUARD_MODEL          = var.openrouter_guard_model
     OPENAI_CHAT_MODEL               = var.openai_chat_model
+    OPENAI_TRACING_ENABLED                = "true"
+    OPENAI_TRACING_INCLUDE_SENSITIVE_DATA = "false"
   }
 
   container_environment = [

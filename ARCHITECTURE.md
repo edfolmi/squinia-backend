@@ -129,6 +129,9 @@ The backend uses:
 - Provider fallback for selected AI and voice operations.
 - Health checks for deployment readiness.
 - Load-balanced ECS deployment for production availability.
+- Model-call logs for chat guard, chat response, and evaluation agents: model, provider, latency, status, and token counts when available.
+- OpenAI tracing for chat and evaluation workflows only, with sensitive payload capture disabled by default.
+- LiveKit Cloud as the source of truth for phone/video room, media, participant, and agent telemetry.
 
 Known local-development concern: uvicorn reload can start duplicate LiveKit workers. Use `LIVEKIT_WORKER_PORT=0` and stop stale local workers before testing voice/video flows.
 

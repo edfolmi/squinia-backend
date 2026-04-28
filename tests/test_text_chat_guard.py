@@ -6,6 +6,11 @@ from app.core.exceptions import AppError
 from app.services.ai import text_simulation_chat as chat
 
 
+@pytest.fixture(autouse=True)
+def disable_openai_tracing(monkeypatch) -> None:
+    monkeypatch.setattr(chat.settings, "OPENAI_TRACING_ENABLED", False)
+
+
 def test_guard_decision_parses_safe_and_unsafe() -> None:
     assert chat._guard_decision("safe") == "safe"
     assert chat._guard_decision("unsafe\nS1") == "unsafe"
