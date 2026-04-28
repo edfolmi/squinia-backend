@@ -336,6 +336,27 @@ resource "aws_iam_role_policy" "ecs_task_ses" {
   })
 }
 
+resource "aws_iam_role_policy" "ecs_task_exec_commands" {
+  name = "${local.name_prefix}-ecs-exec"
+  role = aws_iam_role.ecs_task.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_openid_connect_provider" "github" {
   count = local.create_github_oidc_provider ? 1 : 0
 

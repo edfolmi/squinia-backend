@@ -10,6 +10,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY alembic ./alembic
 COPY app ./app
+COPY scripts ./scripts
 COPY alembic.ini main.py README.md ./
 
 
