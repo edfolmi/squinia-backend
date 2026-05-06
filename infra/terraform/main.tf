@@ -14,31 +14,31 @@ locals {
   }
 
   app_environment = {
-    APP_NAME                        = var.app_name
-    ENVIRONMENT                     = "production"
-    DEBUG                           = "false"
-    API_V1_PREFIX                   = "/api/v1"
-    AWS_REGION                      = var.aws_region
-    CORS_ORIGINS                    = var.cors_origins_json
-    PUBLIC_APP_URL                  = var.frontend_origin
-    EMAIL_PROVIDER                  = var.email_provider
-    SES_FROM_EMAIL                  = var.ses_from_email
-    LOG_LEVEL                       = var.log_level
-    DB_ECHO                         = "false"
-    DB_POOL_SIZE                    = "5"
-    DB_MAX_OVERFLOW                 = "10"
-    REDIS_CACHE_TTL                 = "300"
-    REDIS_CONNECT_TIMEOUT_SECONDS   = "2.0"
-    RATE_LIMIT_PER_MINUTE           = "60"
-    WS_SESSION_TOKEN_EXPIRE_MINUTES = "5"
-    LIVEKIT_URL                     = var.livekit_url
-    LIVEKIT_AGENT_NAME              = var.livekit_agent_name
-    LIVEKIT_WORKER_AUTOSTART        = tostring(var.livekit_worker_autostart)
-    LIVEKIT_WORKER_MODE             = "start"
-    LIVEKIT_WORKER_PORT             = "0"
-    OPENROUTER_CHAT_MODEL           = var.openrouter_chat_model
-    OPENROUTER_GUARD_MODEL          = var.openrouter_guard_model
-    OPENAI_CHAT_MODEL               = var.openai_chat_model
+    APP_NAME                              = var.app_name
+    ENVIRONMENT                           = "production"
+    DEBUG                                 = "false"
+    API_V1_PREFIX                         = "/api/v1"
+    AWS_REGION                            = var.aws_region
+    CORS_ORIGINS                          = var.cors_origins_json
+    PUBLIC_APP_URL                        = var.frontend_origin
+    EMAIL_PROVIDER                        = var.email_provider
+    SES_FROM_EMAIL                        = var.ses_from_email
+    LOG_LEVEL                             = var.log_level
+    DB_ECHO                               = "false"
+    DB_POOL_SIZE                          = "5"
+    DB_MAX_OVERFLOW                       = "10"
+    REDIS_CACHE_TTL                       = "300"
+    REDIS_CONNECT_TIMEOUT_SECONDS         = "2.0"
+    RATE_LIMIT_PER_MINUTE                 = "60"
+    WS_SESSION_TOKEN_EXPIRE_MINUTES       = "5"
+    LIVEKIT_URL                           = var.livekit_url
+    LIVEKIT_AGENT_NAME                    = var.livekit_agent_name
+    LIVEKIT_WORKER_AUTOSTART              = tostring(var.livekit_worker_autostart)
+    LIVEKIT_WORKER_MODE                   = "start"
+    LIVEKIT_WORKER_PORT                   = "0"
+    OPENROUTER_CHAT_MODEL                 = var.openrouter_chat_model
+    OPENROUTER_GUARD_MODEL                = var.openrouter_guard_model
+    OPENAI_CHAT_MODEL                     = var.openai_chat_model
     OPENAI_TRACING_ENABLED                = "true"
     OPENAI_TRACING_INCLUDE_SENSITIVE_DATA = "false"
   }
@@ -470,7 +470,7 @@ resource "aws_ecs_cluster" "main" {
 
   setting {
     name  = "containerInsights"
-    value = "enabled"
+    value = "disabled"
   }
 
   tags = local.common_tags
